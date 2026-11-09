@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from "next";
+import type { ReactNode } from "react";
 import Nav from "@/components/Nav";
 import "./globals.css";
 
@@ -13,7 +14,7 @@ export const viewport: Viewport = {
   maximumScale: 1,
 };
 
-export default function RootLayout({ children }: LayoutProps<"/">) {
+export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="zh-CN" className="h-full antialiased">
       <body className="flex min-h-full flex-col">

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import PackageSheet from "@/components/PackageSheet";
 import {
+  HOT_CITIES,
   INDUSTRIES,
   PACKAGE_TYPES,
   PRICE_STEPS,
@@ -205,6 +206,26 @@ export default function HomePage() {
       </section>
 
       <section className="card space-y-2 p-3">
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className="mr-0.5 text-[11px] text-muted">热门城市</span>
+          {HOT_CITIES.map((name) => (
+            <button
+              key={name}
+              onClick={() => {
+                setCity(city === name ? "" : name);
+                setDistrict("");
+              }}
+              className={`rounded-lg border px-2.5 py-1 text-xs transition-colors ${
+                city === name
+                  ? "border-brand bg-brand/10 text-brand"
+                  : "border-border text-muted hover:bg-black/[0.03]"
+              }`}
+            >
+              {name.replace(/市$/, "")}
+            </button>
+          ))}
+        </div>
+
         <div className="flex flex-wrap gap-1.5">
           <button
             onClick={() => setIndustry("")}

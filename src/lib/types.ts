@@ -39,6 +39,20 @@ export const SORT_OPTIONS = [
 
 export type SortValue = (typeof SORT_OPTIONS)[number]["value"];
 
+/** 运营重点城市：购买力强、停车难，车场库默认优先展示 */
+export const FOCUS_CITIES = [
+  "北京市", "上海市", "广州市", "深圳市",
+  "杭州市", "南京市", "成都市", "武汉市", "西安市", "重庆市", "天津市",
+  "苏州市", "郑州市", "长沙市", "青岛市", "合肥市", "福州市", "厦门市",
+  "济南市", "昆明市", "南昌市", "沈阳市", "大连市", "东莞市", "佛山市",
+] as const;
+
+/** 首页快捷城市入口 */
+export const HOT_CITIES = [
+  "北京市", "上海市", "广州市", "深圳市",
+  "杭州市", "南京市", "成都市", "武汉市", "西安市",
+] as const;
+
 /** 价格档位（分），用于筛选栏 */
 export const PRICE_STEPS = [
   { value: 0, label: "不限" },

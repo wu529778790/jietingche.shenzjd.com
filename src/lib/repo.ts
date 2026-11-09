@@ -2,6 +2,7 @@ import type { Row } from "@libsql/client";
 import { db, ensureSchema, newId, now, num, str } from "./db";
 import { CONFIG_KEYS } from "./schema";
 import {
+  FOCUS_CITIES,
   distanceMeters,
   toCarPark,
   toLog,
@@ -104,11 +105,13 @@ export async function listParks(
     conds.push("EXISTS (SELECT 1 FROM packages pk WHERE pk.park_id = car_parks.id AND pk.qr_path <> '')");
   }
   const where = conds.length ? ` WHERE ${conds.join(" AND ")}` : "";
+  // 车场库默认把北上广深/省会排前面（低购买力城市不用占首屏）
+  const focusSql = `CASE WHEN city IN (${placeholders(FOCUS_CITIES.length)}) THEN 0 ELSE 1 END`;
   const [totalRes, parkRes] = await Promise.all([
     db.execute({ sql: `SELECT COUNT(*) AS n FROM car_parks${where}`, args }),
     db.execute({
-      sql: `SELECT * FROM car_parks${where} ORDER BY updated_at DESC LIMIT ? OFFSET ?`,
-      args: [...args, pageSize, (page - 1) * pageSize],
+      sql: `SELECT * FROM car_parks${where} ORDER BY ${focusSql} ASC, updated_at DESC LIMIT ? OFFSET ?`,
+      args: [...args, ...FOCUS_CITIES, pageSize, (page - 1) * pageSize],
     }),
   ]);
   const parks: ParkWithPackages[] = parkRes.rows.map((row) => ({
@@ -385,7 +388,12 @@ export async function searchPublic(input: SearchInput): Promise<SearchResult> {
   const lng = typeof input.lng === "number" ? input.lng : 0;
   const hasGeo = Number.isFinite(lat) && Number.isFinite(lng) && (lat !== 0 || lng !== 0);
 
-  const orderArgs: number[] = [];
+  const orderArgs: (string | number)[] = [];
+  // 没选城市、没定位时，推荐位优先给北上广深/省会
+  const focusOrder =
+    !input.city && !hasGeo
+      ? `CASE WHEN c.city IN (${placeholders(FOCUS_CITIES.length)}) THEN 0 ELSE 1 END ASC`
+      : "";
   let orderSql = "MAX(k.commission) DESC, MIN(k.price) ASC";
   if (input.sort === "distance" && hasGeo) {
     orderSql = "MIN(((c.lat - ?) * (c.lat - ?)) + ((c.lng - ?) * (c.lng - ?)) * ?) ASC, MIN(k.price) ASC";
@@ -397,12 +405,14 @@ export async function searchPublic(input: SearchInput): Promise<SearchResult> {
     orderSql = "MAX(k.commission) DESC";
   }
 
+  const finalOrder = [focusOrder, orderSql].filter(Boolean).join(", ");
+  const finalOrderArgs = focusOrder ? [...FOCUS_CITIES, ...orderArgs] : orderArgs;
   const whereSql = [...parkConds, ...pkgConds].join(" AND ");
   const [idRes, totalRes] = await Promise.all([
     db.execute({
       sql: `SELECT c.id AS id FROM car_parks c JOIN packages k ON k.park_id = c.id
-            WHERE ${whereSql} GROUP BY c.id ORDER BY ${orderSql} LIMIT ? OFFSET ?`,
-      args: [...parkArgs, ...pkgArgs, ...orderArgs, pageSize, (page - 1) * pageSize],
+            WHERE ${whereSql} GROUP BY c.id ORDER BY ${finalOrder} LIMIT ? OFFSET ?`,
+      args: [...parkArgs, ...pkgArgs, ...finalOrderArgs, pageSize, (page - 1) * pageSize],
     }),
     db.execute({
       sql: `SELECT COUNT(DISTINCT c.id) AS n FROM car_parks c JOIN packages k ON k.park_id = c.id
