@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { adminFetch } from "@/lib/adminClient";
 import { yuan } from "@/lib/types";
 
 interface StatRow {
@@ -44,7 +45,7 @@ export default function StatsPage() {
 
   const load = useCallback(async () => {
     try {
-      const res = await fetch("/api/stats");
+      const res = await adminFetch("/api/stats");
       const json = await res.json();
       setRows(json.data?.parks ?? []);
     } finally {
@@ -67,7 +68,7 @@ export default function StatsPage() {
     const timer = setTimeout(() => {
       const params = new URLSearchParams({ limit: "30" });
       if (pkgQuery.trim()) params.set("q", pkgQuery.trim());
-      fetch(`/api/packages?${params.toString()}`)
+      adminFetch(`/api/packages?${params.toString()}`)
         .then((res) => res.json())
         .then((json) => setOptions(json.data ?? []))
         .catch(() => undefined);
@@ -84,7 +85,7 @@ export default function StatsPage() {
     if (!form.packageId) return;
     setSaving(true);
     try {
-      await fetch("/api/stats", {
+      await adminFetch("/api/stats", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

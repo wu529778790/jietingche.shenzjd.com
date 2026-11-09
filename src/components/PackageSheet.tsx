@@ -1,13 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import {
-  CHANNELS,
-  formatDistance,
-  yuan,
-  type Package,
-  type ParkWithPackages,
-} from "@/lib/types";
+import { formatDistance, yuan, type Package, type ParkWithPackages } from "@/lib/types";
 
 interface Props {
   park: ParkWithPackages;
@@ -15,15 +8,6 @@ interface Props {
   onClose: () => void;
   /** 套餐没配专属码时的兜底推广码 */
   promoQrPath?: string;
-  /** public = 给访客看（只留扫码买），internal = 推广员工作台 */
-  mode?: "public" | "internal";
-}
-
-function buildScript(park: ParkWithPackages, pkg: Package) {
-  const price = pkg.price > 0 ? `¥${yuan(pkg.price)}` : "价格见码";
-  const period = pkg.period ? `（${pkg.period}）` : "";
-  const place = park.address ? `\n位置：${park.address}` : "";
-  return `${park.name}｜${pkg.name} ${price}${period}${place}\n扫这个码直接选到这个套餐，办完就能用。有问题随时问我。`;
 }
 
 function navUrl(park: ParkWithPackages) {
@@ -32,63 +16,8 @@ function navUrl(park: ParkWithPackages) {
   return `https://uri.amap.com/marker?position=${park.lng},${park.lat}&name=${name}&src=web&coordinate=gaode`;
 }
 
-export default function PackageSheet({
-  park,
-  pkg,
-  onClose,
-  promoQrPath = "",
-  mode = "internal",
-}: Props) {
-  const isPublic = mode === "public";
+export default function PackageSheet({ park, pkg, onClose, promoQrPath = "" }: Props) {
   const qr = pkg.qrPath || promoQrPath;
-  const defaultScript = useMemo(() => buildScript(park, pkg), [park, pkg]);
-  const [script, setScript] = useState(defaultScript);
-  const [channel, setChannel] = useState<string>("微信群");
-  const [detail, setDetail] = useState("");
-  const [tip, setTip] = useState("");
-  const [saving, setSaving] = useState(false);
-
-  async function copyScript() {
-    try {
-      await navigator.clipboard.writeText(script);
-      setTip("话术已复制");
-    } catch {
-      setTip("复制失败，请手动选中复制");
-    }
-  }
-
-  async function copyImage() {
-    try {
-      const res = await fetch(qr);
-      const blob = await res.blob();
-      const item = new ClipboardItem({ [blob.type || "image/png"]: blob });
-      await navigator.clipboard.write([item]);
-      setTip("码图已复制，可直接粘贴发送");
-    } catch {
-      setTip("当前浏览器不支持复制图片，请长按图片保存");
-    }
-  }
-
-  async function saveLog() {
-    setSaving(true);
-    try {
-      await fetch("/api/logs", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          parkId: park.id,
-          packageId: pkg.id,
-          channel,
-          channelDetail: detail,
-          content: script,
-        }),
-      });
-      setTip("已记到台账");
-    } finally {
-      setSaving(false);
-    }
-  }
-
   const facts = [
     pkg.typeLabel,
     pkg.period,
@@ -112,7 +41,6 @@ export default function PackageSheet({
               {pkg.name}
               {pkg.period ? ` · ${pkg.period}` : ""}
               {pkg.price > 0 ? ` · ¥${yuan(pkg.price)}` : ""}
-              {!isPublic && pkg.commission > 0 ? ` · 佣金 ¥${yuan(pkg.commission)}` : ""}
             </div>
             {park.distance ? (
               <div className="mt-0.5 text-[11px] text-brand">
@@ -141,7 +69,7 @@ export default function PackageSheet({
           </>
         ) : (
           <div className="mb-3 rounded-xl border border-dashed border-border p-6 text-center text-sm text-muted">
-            {isPublic ? "这个套餐的二维码还没配好，先联系推广员" : "这个套餐还没上传专属码，去车场库补一张"}
+            这个套餐的二维码还没配好，先联系推广员
           </div>
         )}
 
@@ -181,66 +109,9 @@ export default function PackageSheet({
           </div>
         ) : null}
 
-        {isPublic ? (
-          <div className="text-center text-[11px] text-muted">
-            价格与规则以官方页面为准，下单前请确认出场时间限制
-          </div>
-        ) : (
-          <>
-            <div className="mb-2 flex gap-2">
-              <button className="btn-primary flex-1" onClick={copyScript}>
-                复制话术
-              </button>
-              {qr ? (
-                <button className="btn-ghost flex-1" onClick={copyImage}>
-                  复制码图
-                </button>
-              ) : null}
-              {qr ? (
-                <a className="btn-ghost" href={qr} download={`${park.name}-${pkg.name}.png`}>
-                  保存
-                </a>
-              ) : null}
-            </div>
-
-            <div className="mb-2">
-              <label className="label">话术（可改）</label>
-              <textarea
-                className="field h-24 resize-none"
-                value={script}
-                onChange={(e) => setScript(e.target.value)}
-              />
-            </div>
-
-            <div className="mb-3 grid grid-cols-2 gap-2">
-              <div>
-                <label className="label">发给谁</label>
-                <select className="field" value={channel} onChange={(e) => setChannel(e.target.value)}>
-                  {CHANNELS.map((c) => (
-                    <option key={c} value={c}>
-                      {c}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="label">群名 / 对方</label>
-                <input
-                  className="field"
-                  value={detail}
-                  onChange={(e) => setDetail(e.target.value)}
-                  placeholder="如：XX 业主群"
-                />
-              </div>
-            </div>
-
-            <button className="btn-ghost w-full" onClick={saveLog} disabled={saving}>
-              {saving ? "记录中…" : "记到台账"}
-            </button>
-          </>
-        )}
-
-        {tip ? <div className="mt-2 text-center text-xs text-brand">{tip}</div> : null}
+        <div className="text-center text-[11px] text-muted">
+          价格与规则以官方页面为准，下单前请确认出场时间限制
+        </div>
       </div>
     </div>
   );

@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
+import { adminFetch } from "@/lib/adminClient";
 import { INDUSTRIES, PERIODS, yuan, type ParkWithPackages } from "@/lib/types";
 
 const EMPTY_PARK = {
@@ -51,7 +52,7 @@ export default function ParksPage() {
       });
       if (keyword.trim()) params.set("q", keyword.trim());
       if (onlyQr) params.set("withQr", "1");
-      const res = await fetch(`/api/parks?${params.toString()}`);
+      const res = await adminFetch(`/api/parks?${params.toString()}`);
       const json = await res.json();
       setParks(json.data ?? []);
       setTotal(json.total ?? 0);
@@ -66,7 +67,7 @@ export default function ParksPage() {
   }, [load]);
 
   useEffect(() => {
-    fetch("/api/config")
+    adminFetch("/api/config")
       .then((res) => res.json())
       .then((json) => setPromoQrPath(json?.data?.promoQrPath ?? ""))
       .catch(() => undefined);
@@ -77,10 +78,10 @@ export default function ParksPage() {
     try {
       const data = new FormData();
       data.append("file", file);
-      const upRes = await fetch("/api/upload", { method: "POST", body: data });
+      const upRes = await adminFetch("/api/upload", { method: "POST", body: data });
       const upJson = await upRes.json();
       if (!upJson.ok) throw new Error(upJson.error ?? "上传失败");
-      const res = await fetch("/api/config", {
+      const res = await adminFetch("/api/config", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ promoQrPath: upJson.data.url }),
@@ -117,13 +118,13 @@ export default function ParksPage() {
   async function savePark() {
     if (!form.name.trim()) return;
     if (editingId === "new") {
-      await fetch("/api/parks", {
+      await adminFetch("/api/parks", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(form),
       });
     } else if (editingId) {
-      await fetch(`/api/parks/${editingId}`, {
+      await adminFetch(`/api/parks/${editingId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(form),
@@ -135,13 +136,13 @@ export default function ParksPage() {
 
   async function removePark(id: string) {
     if (!confirm("删除后该车场下的套餐和码也会一起删掉，确定？")) return;
-    await fetch(`/api/parks/${id}`, { method: "DELETE" });
+    await adminFetch(`/api/parks/${id}`, { method: "DELETE" });
     await load();
   }
 
   async function addPackage(parkId: string) {
     if (!pkgForm.name.trim()) return;
-    await fetch("/api/packages", {
+    await adminFetch("/api/packages", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -161,7 +162,7 @@ export default function ParksPage() {
 
   async function removePackage(id: string) {
     if (!confirm("删除这个套餐？")) return;
-    await fetch(`/api/packages/${id}`, { method: "DELETE" });
+    await adminFetch(`/api/packages/${id}`, { method: "DELETE" });
     await load();
   }
 
@@ -170,10 +171,10 @@ export default function ParksPage() {
     try {
       const data = new FormData();
       data.append("file", file);
-      const upRes = await fetch("/api/upload", { method: "POST", body: data });
+      const upRes = await adminFetch("/api/upload", { method: "POST", body: data });
       const upJson = await upRes.json();
       if (!upJson.ok) throw new Error(upJson.error ?? "上传失败");
-      await fetch(`/api/packages/${packageId}`, {
+      await adminFetch(`/api/packages/${packageId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ qrPath: upJson.data.url }),

@@ -443,7 +443,6 @@ export default function HomePage() {
           park={active.park}
           pkg={active.pkg}
           promoQrPath={promoQrPath}
-          mode="public"
           onClose={() => setActive(null)}
         />
       ) : null}

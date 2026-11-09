@@ -1,8 +1,8 @@
 # 找停车（jietingche）
 
 按位置和需求找停车场优惠套餐（月卡 / 季卡 / 夜间包月…），选好套餐直接扫码办理。
-数据来自捷停车分销选品池，前台只做「搜索 → 筛选 → 出码」这一件事；
-`/parks`、`/logs`、`/stats` 是给自己用的内部工作台（配专属码、记投放台账、对账）。
+数据来自捷停车分销选品池。**访客只看得到首页这一个页面**：搜索 → 筛选 → 出码。
+管理端全部收在 `/admin/*`，需要口令才能进，前台没有任何入口暴露它们。
 
 ## 开发
 
@@ -52,20 +52,45 @@ node --no-warnings scripts/import-jtc.mjs --city 深圳市   # 只导一个城�
 
 ## 页面
 
-| 路径 | 用途 |
-| --- | --- |
-| `/` | 访客搜索：定位/关键词 + 业态、套餐类型、时段、城市、区域、价格筛选 → 点套餐出二维码 |
-| `/parks` | 车场库：配每个套餐的专属码，以及全局兜底推广码 |
-| `/logs` | 投放台账 |
-| `/stats` | 对账（浏览/下单/佣金） |
+| 路径 | 归属 | 用途 |
+| --- | --- | --- |
+| `/` | 公开 | 访客搜索：定位/关键词 + 业态、套餐类型、时段、城市、区域、价格筛选 → 点套餐出二维码 |
+| `/admin/login` | 公开 | 管理后台登录 |
+| `/admin/parks` | 后台 | 车场库：配每个套餐的专属码，以及全局兜底推广码 |
+| `/admin/logs` | 后台 | 投放台账 |
+| `/admin/stats` | 后台 | 对账（浏览/下单/佣金） |
 
-二维码规则：套餐有专属码就用专属码，没有就用 `/parks` 里配的兜底推广码。
+二维码规则：套餐有专属码就用专属码，没有就用 `/admin/parks` 里配的兜底推广码。
 **上线前记得先传一张兜底码，否则访客看不到码。**
+
+## 后台鉴权
+
+`src/middleware.ts` 拦住 `/admin/*` 和 `/api/*`。公开白名单只有三项：
+`GET /api/search`、`GET /api/facets`、`GET /api/config`（首页要读兜底码），
+加上登录/登出接口和 `/admin/login` 本身。其余读写接口、车场库/台账/对账全部要登录态。
+
+```bash
+# 生产必须配置，容器启动时注入即可（middleware 用 Node 运行时，不需要构建期写死）
+ADMIN_PASSWORD='换成一个强口令'
+```
+
+登录后下发 7 天 HMAC 签名的 httpOnly cookie；生产环境没配 `ADMIN_PASSWORD` 时后台直接 503，
+不存在默认口令。本地开发不配就是免密，方便调试。
+
+模块也按前台/后台拆开了：`src/lib/types.ts` 只放公开领域模型与展示常量（客户端组件会 import），
+`src/lib/adminTypes.ts` 放台账/对账类型，`src/lib/rows.ts` 放 libsql `Row` → 业务对象的映射（仅服务端）。
+`PackageSheet` 只保留访客出码逻辑，原先混在里面的话术、记台账等推广员功能已删除。
 
 ## 接口
 
+公开：
+
 - `GET /api/search?q=&city=&district=&industry=&type=&slot=&maxPrice=&sort=&lat=&lng=&page=`
 - `GET /api/facets?city=` 筛选栏分面
-- `GET /api/parks?q=&page=&pageSize=&withQr=1`
-- `GET /api/packages?q=` 对账选套餐
-- `GET/POST /api/config` 兜底推广码
+- `GET /api/config` 读兜底推广码
+
+需登录（后台）：
+
+- `GET/POST/PATCH/DELETE /api/parks`、`/api/packages`、`/api/logs`、`/api/stats`
+- `POST /api/upload` 上传专属码图片，`POST /api/config` 改兜底码
+- `POST /api/admin/login`、`POST /api/admin/logout`

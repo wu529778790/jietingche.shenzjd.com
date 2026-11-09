@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import type { OutreachLogRow } from "@/lib/types";
+import { adminFetch } from "@/lib/adminClient";
+import type { OutreachLogRow } from "@/lib/adminTypes";
 
 function formatTime(ts: number) {
   const d = new Date(ts);
@@ -15,7 +16,7 @@ export default function LogsPage() {
 
   const load = useCallback(async () => {
     try {
-      const res = await fetch("/api/logs");
+      const res = await adminFetch("/api/logs");
       const json = await res.json();
       setLogs(json.data ?? []);
     } finally {
@@ -28,7 +29,7 @@ export default function LogsPage() {
   }, [load]);
 
   async function remove(id: string) {
-    await fetch(`/api/logs/${id}`, { method: "DELETE" });
+    await adminFetch(`/api/logs/${id}`, { method: "DELETE" });
     await load();
   }
 
