@@ -14,7 +14,7 @@
  * 用法：
  *   node --no-warnings scripts/crawl-jtc-deep.mjs                 北上广深，2 轮
  *   node --no-warnings scripts/crawl-jtc-deep.mjs --city 110100   只跑北京
- *   node --no-warnings scripts/crawl-jtc-deep.mjs --capitals      追加省会城市
+ *   node --no-warnings scripts/crawl-jtc-deep.mjs --capitals      只跑省会/直辖市（不含已饱和的北上广深）
  *   node --no-warnings scripts/crawl-jtc-deep.mjs --rounds 3      多迭代一轮
  */
 
@@ -42,14 +42,15 @@ const TOP4 = {
   "440100": "广州市",
   "440300": "深圳市",
 };
-/** 省会 / 计划单列市，--capitals 时追加 */
+/** 省会 / 直辖市 / 计划单列市，只取官方城市列表里真实存在的 code */
 const CAPITALS = {
+  "120100": "天津市", "500100": "重庆市",
   "320100": "南京市", "330100": "杭州市", "510100": "成都市", "420100": "武汉市",
   "610100": "西安市", "370100": "济南市", "350100": "福州市", "430100": "长沙市",
   "410100": "郑州市", "230100": "哈尔滨市", "220100": "长春市", "210100": "沈阳市",
   "340100": "合肥市", "360100": "南昌市", "530100": "昆明市", "520100": "贵阳市",
   "450100": "南宁市", "460100": "海口市", "620100": "兰州市", "140100": "太原市",
-  "130100": "石家庄市", "150100": "呼和浩特市", "640100": "银川市", "630100": "西宁市",
+  "130100": "石家庄市", "150100": "呼和浩特市",
   "650100": "乌鲁木齐市", "540100": "拉萨市", "210200": "大连市", "370200": "青岛市",
 };
 
@@ -206,7 +207,8 @@ async function main() {
   );
   console.log(`库里已有套餐 ${known.size} 条`);
 
-  const wanted = { ...TOP4, ...(withCapitals ? CAPITALS : {}) };
+  // --capitals 时只跑省会，避免把已饱和的北上广深再跑一遍
+  const wanted = withCapitals ? CAPITALS : TOP4;
   const cityRows = database
     .prepare(
       `SELECT city_code AS code, longitude AS lng, latitude AS lat FROM cities

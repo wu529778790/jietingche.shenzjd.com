@@ -22,7 +22,7 @@ npm run build   # 生产构建
 node --no-warnings scripts/crawl-jtc.mjs         # 每城一个点（市中心）拉全部分页
 node --no-warnings scripts/crawl-jtc-grid.mjs    # 网格补抓：每城多点采样，捞出远郊/周边城区
 node --no-warnings scripts/crawl-jtc-deep.mjs    # 重点城市深抓：北上广深，坐标自举密网格 + 多圈，迭代到饱和
-node --no-warnings scripts/crawl-jtc-deep.mjs --capitals   # 追加省会城市
+node --no-warnings scripts/crawl-jtc-deep.mjs --capitals   # 只跑省会/直辖市（不含已饱和的北上广深）
 node --no-warnings scripts/enrich-jtc.mjs        # 补套餐类型/时段/时长，重算省市区
 
 # 2. 洗入业务库（幂等，重复跑只更新不重复）
@@ -39,6 +39,8 @@ node --no-warnings scripts/import-jtc.mjs --city 深圳市   # 只导一个城�
 `crawl-jtc-deep.mjs` 是重点城市专用的加强版：拿已抓套餐的坐标做 ~3km 自举网格，
 再加 10~60km 多圈采样，第二轮新增为 0 即视为饱和。四城实测已饱和
 （北京第二轮 +0、上海 +0、广州 +2、深圳 +0）。
+`--capitals` 覆盖官方城市列表里存在的 28 个省会/直辖市/计划单列市
+（银川、西宁没有城市条目），同样迭代到第二轮无新增。
 
 前台优先级：`src/lib/types.ts` 的 `FOCUS_CITIES`（北上广深 + 省会/强二线）
 决定车场库默认排序与首页没选城市/没定位时的推荐顺序，
