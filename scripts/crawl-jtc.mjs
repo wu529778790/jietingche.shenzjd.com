@@ -18,6 +18,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { splitCanton } from './lib/canton.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(__dirname, '..');
@@ -55,51 +56,6 @@ async function post(url, body, retry = 2) {
       await sleep(800 * (i + 1));
     }
   }
-}
-
-const PROVINCES = [
-  '黑龙江', '内蒙古', '新疆维吾尔', '广西壮族', '宁夏回族', '广西', '宁夏', '新疆', '西藏',
-  '香港', '澳门', '北京', '天津', '上海', '重庆', '河北', '山西', '辽宁', '吉林', '江苏',
-  '浙江', '安徽', '福建', '江西', '山东', '河南', '湖北', '湖南', '广东', '海南', '四川',
-  '贵州', '云南', '陕西', '甘肃', '青海', '台湾',
-];
-const MUNICIPALITIES = ['北京', '天津', '上海', '重庆'];
-const PROVINCE_ALIAS = { 新疆维吾尔: '新疆', 广西壮族: '广西', 宁夏回族: '宁夏' };
-
-/**
- * canton 实际出现的形态：
- *   广东深圳市宝安区 / 广东省深圳市宝安区
- *   北京市(省)北京市朝阳区 / 上海上海市黄浦区 / 上海上海城区宝山区
- *   新疆维吾尔乌鲁木齐市沙依巴克区 / 新疆乌鲁木齐市天山区
- *   广西壮族自治区南宁市青秀区 / 广西南宁市良庆区
- * 统一归一为：省份简称（直辖市用「XX市」）+ 城市 + 区县
- */
-function splitCanton(canton) {
-  if (!canton) return { province: '', city: '', district: '' };
-  const s0 = canton.replace(/\(省\)/g, '');
-
-  const hit = PROVINCES.filter((x) => s0.startsWith(x)).sort((a, b) => b.length - a.length)[0];
-  if (!hit) return { province: canton, city: '', district: '' };
-
-  let province = PROVINCE_ALIAS[hit] || (MUNICIPALITIES.includes(hit) ? `${hit}市` : hit);
-  let s = s0.slice(hit.length);
-
-  if (s.startsWith('壮族自治区')) s = s.slice(5);
-  else if (s.startsWith('回族自治区')) s = s.slice(5);
-  else if (s.startsWith('自治区')) s = s.slice(3);
-  else if (s.startsWith('省')) s = s.slice(1);
-  else if (s.startsWith('市')) s = s.slice(1);
-
-  const i = s.indexOf('市');
-  if (i >= 0) return { province, city: s.slice(0, i + 1), district: s.slice(i + 1) };
-
-  // 直辖市另一种写法：上海上海城区宝山区（整串没有「市」字）
-  const cityArea = s.match(/^.*?城区(.*)$/);
-  if (cityArea && province.endsWith('市')) {
-    return { province, city: province, district: cityArea[1] || '' };
-  }
-
-  return { province, city: s, district: '' };
 }
 
 function initDb() {

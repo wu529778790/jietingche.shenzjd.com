@@ -19,13 +19,20 @@ npm run build   # 生产构建
 
 ```bash
 # 1. 抓官方选品池（输出 data/jtc.db）
-node --no-warnings scripts/crawl-jtc.mjs
-node --no-warnings scripts/enrich-jtc.mjs
+node --no-warnings scripts/crawl-jtc.mjs         # 每城一个点（市中心）拉全部分页
+node --no-warnings scripts/crawl-jtc-grid.mjs    # 网格补抓：每城多点采样，捞出远郊/周边城区
+node --no-warnings scripts/enrich-jtc.mjs        # 补套餐类型/时段/时长，重算省市区
 
 # 2. 洗入业务库（幂等，重复跑只更新不重复）
 node --no-warnings scripts/import-jtc.mjs
 node --no-warnings scripts/import-jtc.mjs --city 深圳市   # 只导一个城市
 ```
+
+**为什么要网格补抓**：`query_package_list` 只认查询坐标，按距离由近到远分页，
+传 `cityCode` / `canton` 之类的行政区参数都无效；一个市中心点只能覆盖半径内的套餐，
+远郊（如深圳坪山、上海嘉定）完全看不到。`crawl-jtc-grid.mjs` 以城市中心为原点，
+按 9km / 18km / 30km 三圈采样，用 `package_id` 去重合并，并可反复增量跑（跑不出新增即为已饱和）。
+城市实测池子里的大城市自动多采外圈，行政区划解析统一收口在 `scripts/lib/canton.mjs`。
 
 导入做了什么：按 `park_code` 归并车场、`package_id` 派生稳定主键、佣金元→分、
 按车场名推断业态（商场/写字楼/医院/景区/社区/交通枢纽）、官方 `<居住推荐>` 等标签转成适用人群。

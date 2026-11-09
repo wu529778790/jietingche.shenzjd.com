@@ -115,7 +115,25 @@ const where = onlyCity ? "WHERE city = ?" : "";
 const rows = onlyCity
   ? src.prepare(`SELECT * FROM packages ${where}`).all(onlyCity)
   : src.prepare("SELECT * FROM packages").all();
+const cityNames = new Map(
+  src.prepare("SELECT city_code, city_name FROM cities").all().map((row) => [
+    String(row.city_code),
+    String(row.city_name || ""),
+  ]),
+);
 src.close();
+
+/** 官方城市列表里直辖市写成「上海城区」「市辖区」，归一化成前台用的市名 */
+const CITY_ALIAS = {
+  上海城区: "上海市",
+  北京城区: "北京市",
+  天津城区: "天津市",
+  市辖区: "重庆市",
+};
+function fallbackCity(code) {
+  const name = cleanName(cityNames.get(code));
+  return CITY_ALIAS[name] || (name.endsWith("城区") ? name.replace(/城区$/, "市") : name);
+}
 
 console.log(`源数据：${rows.length} 条套餐`);
 
@@ -131,7 +149,7 @@ for (const row of rows) {
     park = {
       code,
       name,
-      city: cleanName(row.city),
+      city: cleanName(row.city) || fallbackCity(cleanName(row.city_code)),
       district: cleanName(row.district),
       province: cleanName(row.province),
       address: (row.address ?? "").trim(),

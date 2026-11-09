@@ -13,6 +13,7 @@
 import { DatabaseSync } from 'node:sqlite';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { splitCanton } from './lib/canton.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const DB_PATH = resolve(__dirname, '../data/jtc.db');
@@ -104,6 +105,8 @@ function main() {
       discount_rate = ?, is_charge = ?, total_share_space = ?, left_share_space = ?
     WHERE package_id = ?
   `);
+  // 行政区划统一用 lib/canton 重算，修掉「上海城区嘉定区」这类解析偏差
+  const updGeo = db.prepare('UPDATE packages SET province = ?, city = ?, district = ? WHERE package_id = ?');
 
   let n = 0;
   db.exec('BEGIN');
@@ -142,6 +145,8 @@ function main() {
         o.leftShareSpace != null ? Number(o.leftShareSpace) : null,
         row.package_id
       );
+      const geo = splitCanton(o.canton);
+      updGeo.run(geo.province || null, geo.city || null, geo.district || null, row.package_id);
       n += 1;
     }
     db.exec('COMMIT');
@@ -170,6 +175,7 @@ function main() {
   table('时长', db.prepare('SELECT duration_label 时长, COUNT(*) 数量 FROM packages GROUP BY duration_label ORDER BY 数量 DESC LIMIT 10').all());
   table('状态', db.prepare('SELECT status 状态, COUNT(*) 数量 FROM packages GROUP BY status').all());
   table('限时特惠', db.prepare('SELECT limit_time_flag 限时, COUNT(*) 数量 FROM packages GROUP BY limit_time_flag').all());
+  table('城市 TOP10', db.prepare("SELECT city 城市, COUNT(*) 数量 FROM packages WHERE city <> '' GROUP BY city ORDER BY 数量 DESC LIMIT 10").all());
 
   console.log('\n数据库：', DB_PATH);
   db.close();
