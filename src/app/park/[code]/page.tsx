@@ -10,7 +10,7 @@ import {
   listParkPackages,
 } from "@/lib/seoRepo";
 import { getPublicConfig } from "@/lib/repo";
-import { packageQrDataUrl } from "@/lib/qr";
+import { packagePromoLink, packageQrDataUrl } from "@/lib/qr";
 import {
   absoluteUrl,
   breadcrumbJsonLd,
@@ -89,6 +89,9 @@ export default async function ParkPage({ params }: PageProps) {
   const { park, packages, nearby, shareCode } = data;
   const lowest = cheapestMonthly(packages);
   const cheapest = packages[0];
+  const promoLink = cheapest
+    ? packagePromoLink(park.parkCode, cheapest.sourcePackageId, shareCode)
+    : "";
   const qr = cheapest
     ? packageQrDataUrl(park.parkCode, cheapest.sourcePackageId, shareCode)
     : "";
@@ -229,17 +232,32 @@ export default async function ParkPage({ params }: PageProps) {
         </section>
       ) : null}
 
-      {qr ? (
+      {promoLink ? (
         <section className="card p-4 text-center" aria-labelledby="qr-title">
           <h2 id="qr-title" className="text-sm font-semibold">
-            扫码办理
+            办理这个套餐
           </h2>
           <p className="mt-1 text-[11px] text-muted">
-            微信扫码 → 选「{[cheapest?.typeLabel, cheapest?.period].filter(Boolean).join(" · ")}
-            」→ 支付后当天生效
+            {[cheapest?.typeLabel, cheapest?.period].filter(Boolean).join(" · ")}
+            {cheapest && cheapest.price > 0 ? ` · ¥${yuan(cheapest.price)}` : ""}
+            ，支付后当天生效
           </p>
-          <div className="mx-auto mt-3 w-fit rounded-xl border border-border bg-white p-2">
-            {/* 二维码由服务端现场生成，不落库 */}
+
+          {/* 手机：直接点进官方页面，不用先出码再扫 */}
+          <div className="mt-3 sm:hidden">
+            <a
+              href={promoLink}
+              target="_blank"
+              rel="noreferrer"
+              className="btn-primary w-full py-2.5 text-sm"
+            >
+              打开官方页面办理
+            </a>
+            <p className="mt-1.5 text-[11px] text-muted">跳转后在微信里完成支付，名额与价格以官方页面为准</p>
+          </div>
+
+          {/* PC：没有微信登录态，扫码是唯一顺的路径 */}
+          <div className="mx-auto mt-3 hidden w-fit rounded-xl border border-border bg-white p-2 sm:block">
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
               src={qr}
@@ -248,9 +266,11 @@ export default async function ParkPage({ params }: PageProps) {
               width={176}
               height={176}
             />
+            <p className="mt-1 max-w-[176px] text-center text-[11px] text-muted">微信扫一扫办理</p>
           </div>
+
           <p className="mt-3 text-[11px] leading-relaxed text-muted">
-            本站不代收费用，扫码后进入捷停车官方页面完成支付；
+            本站不代收费用，付款在捷停车官方页面完成；
             价格与规则以官方页面为准，下单前请确认出入场时间限制。
           </p>
         </section>

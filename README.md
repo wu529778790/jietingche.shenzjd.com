@@ -140,6 +140,10 @@ npm run toy -- --snapshot data/jtc-snapshot.json        # B站 Toy → platforms
 车场缺官方编码时退到官方搜索页链接。`shareCode` 取 `app_config.share_code`，
 没配则读环境变量 `JTC_SHARE_CODE`，再没有就用 `src/lib/types.ts` 里的兜底值。
 
+**能直链就别扫码**：套餐链接本身就是普通 H5，手机端直接给「打开官方页面办理」按钮
+（外加复制链接兜底），少一步；二维码只在 PC（没有微信登录态）和「直链打不开/要转发」
+时出现。小红书小工具受容器限制不能外跳，仍只能出码图给用户保存到相册。
+
 ## 后台鉴权
 
 `src/proxy.ts`（Next 16 的 proxy 约定，即原 middleware）拦住 `/admin/*` 和 `/api/*`。公开白名单：

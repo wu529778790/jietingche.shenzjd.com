@@ -1,7 +1,7 @@
 "use client";
 
-import { useMemo } from "react";
-import { packageQrDataUrl } from "@/lib/qr";
+import { useCallback, useMemo, useState } from "react";
+import { packagePromoLink, packageQrDataUrl } from "@/lib/qr";
 import {
   formatDistance,
   monthlyPrice,
@@ -28,10 +28,25 @@ function navUrl(park: ParkWithPackages) {
 
 export default function PackageSheet({ park, pkg, onClose, shareCode = "" }: Props) {
   // 码全是前端现场生成的：套餐直达码 → 缺编码时退到搜索页
+  const link = useMemo(
+    () => packagePromoLink(park.parkCode, pkg.sourcePackageId, shareCode),
+    [park.parkCode, pkg.sourcePackageId, shareCode],
+  );
   const qr = useMemo(
     () => packageQrDataUrl(park.parkCode, pkg.sourcePackageId, shareCode),
     [park.parkCode, pkg.sourcePackageId, shareCode],
   );
+
+  const [copied, setCopied] = useState(false);
+  const copyLink = useCallback(async () => {
+    try {
+      await navigator.clipboard.writeText(link);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // 非安全上下文没有剪贴板权限，用户还能手点链接
+    }
+  }, [link]);
 
   /** 官方套餐名带车场前缀，标题已经写了车场，这里只留套餐本身 */
   const pkgLabel = useMemo(() => shortPackageName(park.name, pkg.name), [park.name, pkg.name]);
@@ -87,9 +102,35 @@ export default function PackageSheet({ park, pkg, onClose, shareCode = "" }: Pro
           ))}
         </div>
 
+        {/* 手机：能直接点就别让人扫，少一步是一步 */}
+        {link ? (
+          <div className="mb-3 sm:hidden">
+            <a
+              href={link}
+              target="_blank"
+              rel="noreferrer"
+              className="btn-primary w-full py-2.5 text-sm"
+            >
+              打开官方页面办理
+            </a>
+            <div className="mt-1.5 flex items-center justify-center gap-1.5 text-[11px] text-muted">
+              <span>在微信里完成支付</span>
+              <span aria-hidden="true">·</span>
+              <button
+                type="button"
+                className="underline underline-offset-2"
+                onClick={copyLink}
+              >
+                {copied ? "已复制链接" : "复制链接"}
+              </button>
+            </div>
+          </div>
+        ) : null}
+
         {qr ? (
           <>
-            <div className="mb-2 rounded-xl border border-border bg-white p-2">
+            {/* PC 没有微信登录态，扫码才是最顺的路径 */}
+            <div className="mb-2 hidden rounded-xl border border-border bg-white p-2 sm:block">
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
                 src={qr}
@@ -97,13 +138,31 @@ export default function PackageSheet({ park, pkg, onClose, shareCode = "" }: Pro
                 className="mx-auto block max-h-52 w-auto"
               />
             </div>
-            <div className="mb-3 text-center text-xs text-muted">
-              长按识别二维码 → 选「{pkgLabel}」下单，办完当天就能用
+            <div className="mb-3 hidden text-center text-xs text-muted sm:block">
+              微信扫一扫 → 选「{pkgLabel}」下单，办完当天就能用
             </div>
+
+            {/* 手机端兜底：直链打不开、或者要转发给别人时再用 */}
+            <details className="mb-3 sm:hidden">
+              <summary className="list-none cursor-pointer text-center text-[11px] text-muted [&::-webkit-details-marker]:hidden">
+                打不开？点这里看二维码
+              </summary>
+              <div className="mt-2 rounded-xl border border-border bg-white p-2">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={qr}
+                  alt={`${park.name}套餐二维码`}
+                  className="mx-auto block max-h-44 w-auto"
+                />
+              </div>
+              <p className="mt-1.5 text-center text-[11px] text-muted">
+                用微信扫一扫，或截图后在微信里识别
+              </p>
+            </details>
           </>
         ) : (
           <div className="mb-3 rounded-xl border border-dashed border-border p-6 text-center text-sm text-muted">
-            二维码生成失败，刷新页面再试，或直接在小程序里搜「{park.name}」
+            链接生成失败，刷新页面再试，或直接在小程序里搜「{park.name}」
           </div>
         )}
 

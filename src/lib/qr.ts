@@ -61,16 +61,26 @@ export function qrDataUrl(text: string, cellSize = 6, margin = 20): string {
 }
 
 /**
- * 套餐码：优先直达该套餐，缺官方编码就退到搜索页兜底。
- * shareCode 传空（接口没返回）时也能出码，用内置兜底值。
+ * 套餐落地链接：优先直达该套餐，缺官方编码就退到搜索页兜底。
+ * shareCode 传空（接口没返回）时也能拼，用内置兜底值。
+ *
+ * 手机端可以直接把这个链接给用户点（不用非走二维码），
+ * 二维码只是「跨 App / PC / 打印」场景的兜底。
  */
-export function packageQrDataUrl(
+export function packagePromoLink(
   parkCode: string,
   packageId: string,
   shareCode: string,
 ): string {
   const code = shareCode || DEFAULT_SHARE_CODE;
-  return (
-    qrDataUrl(packagePromoUrl(parkCode, packageId, code)) || qrDataUrl(searchPromoUrl(code))
-  );
+  return packagePromoUrl(parkCode, packageId, code) || searchPromoUrl(code);
+}
+
+/** 套餐码：内容就是上面的落地链接 */
+export function packageQrDataUrl(
+  parkCode: string,
+  packageId: string,
+  shareCode: string,
+): string {
+  return qrDataUrl(packagePromoLink(parkCode, packageId, shareCode));
 }
