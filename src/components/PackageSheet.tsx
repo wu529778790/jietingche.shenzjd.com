@@ -1,7 +1,7 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
-import { packagePromoLink, packageQrDataUrl } from "@/lib/qr";
+import { useEffect, useMemo, useState } from "react";
+import { packageQrDataUrl } from "@/lib/qr";
 import {
   formatDistance,
   monthlyPrice,
@@ -28,25 +28,16 @@ function navUrl(park: ParkWithPackages) {
 
 export default function PackageSheet({ park, pkg, onClose, shareCode = "" }: Props) {
   // 码全是前端现场生成的：套餐直达码 → 缺编码时退到搜索页
-  const link = useMemo(
-    () => packagePromoLink(park.parkCode, pkg.sourcePackageId, shareCode),
-    [park.parkCode, pkg.sourcePackageId, shareCode],
-  );
   const qr = useMemo(
     () => packageQrDataUrl(park.parkCode, pkg.sourcePackageId, shareCode),
     [park.parkCode, pkg.sourcePackageId, shareCode],
   );
 
-  const [copied, setCopied] = useState(false);
-  const copyLink = useCallback(async () => {
-    try {
-      await navigator.clipboard.writeText(link);
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 2000);
-    } catch {
-      // 非安全上下文没有剪贴板权限，用户还能手点链接
-    }
-  }, [link]);
+  /** 微信内可以长按识别；别的环境只能扫码或截图扫码，提示词要分开 */
+  const [inWechat, setInWechat] = useState(false);
+  useEffect(() => {
+    setInWechat(/MicroMessenger/i.test(navigator.userAgent));
+  }, []);
 
   /** 官方套餐名带车场前缀，标题已经写了车场，这里只留套餐本身 */
   const pkgLabel = useMemo(() => shortPackageName(park.name, pkg.name), [park.name, pkg.name]);
@@ -102,63 +93,25 @@ export default function PackageSheet({ park, pkg, onClose, shareCode = "" }: Pro
           ))}
         </div>
 
-        {/* 手机：能直接点就别让人扫，少一步是一步 */}
-        {link ? (
-          <div className="mb-3 sm:hidden">
-            <a
-              href={link}
-              target="_blank"
-              rel="noreferrer"
-              className="btn-primary w-full py-2.5 text-sm"
-            >
-              打开官方页面办理
-            </a>
-            <div className="mt-1.5 flex items-center justify-center gap-1.5 text-[11px] text-muted">
-              <span>在微信里完成支付</span>
-              <span aria-hidden="true">·</span>
-              <button
-                type="button"
-                className="underline underline-offset-2"
-                onClick={copyLink}
-              >
-                {copied ? "已复制链接" : "复制链接"}
-              </button>
-            </div>
-          </div>
-        ) : null}
-
+        {/*
+          只能出码：实测这个链接在微信里点不开（微信只会跳小程序），
+          唯一能到下单页的入口是「扫一扫 / 长按识别」。
+        */}
         {qr ? (
           <>
-            {/* PC 没有微信登录态，扫码才是最顺的路径 */}
-            <div className="mb-2 hidden rounded-xl border border-border bg-white p-2 sm:block">
+            <div className="mb-2 rounded-xl border border-border bg-white p-2">
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
                 src={qr}
                 alt={`${park.name}套餐二维码`}
-                className="mx-auto block max-h-52 w-auto"
+                className="mx-auto block max-h-56 w-auto"
               />
             </div>
-            <div className="mb-3 hidden text-center text-xs text-muted sm:block">
-              微信扫一扫 → 选「{pkgLabel}」下单，办完当天就能用
+            <div className="mb-3 text-center text-xs leading-relaxed text-muted">
+              {inWechat
+                ? `长按识别二维码 → 选「${pkgLabel}」下单，办完当天就能用`
+                : "用微信「扫一扫」办理；手机浏览器打开的话，截图后到微信「扫一扫 → 相册」里选这张图"}
             </div>
-
-            {/* 手机端兜底：直链打不开、或者要转发给别人时再用 */}
-            <details className="mb-3 sm:hidden">
-              <summary className="list-none cursor-pointer text-center text-[11px] text-muted [&::-webkit-details-marker]:hidden">
-                打不开？点这里看二维码
-              </summary>
-              <div className="mt-2 rounded-xl border border-border bg-white p-2">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={qr}
-                  alt={`${park.name}套餐二维码`}
-                  className="mx-auto block max-h-44 w-auto"
-                />
-              </div>
-              <p className="mt-1.5 text-center text-[11px] text-muted">
-                用微信扫一扫，或截图后在微信里识别
-              </p>
-            </details>
           </>
         ) : (
           <div className="mb-3 rounded-xl border border-dashed border-border p-6 text-center text-sm text-muted">

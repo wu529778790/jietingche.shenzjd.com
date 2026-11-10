@@ -10,7 +10,7 @@ import {
   listParkPackages,
 } from "@/lib/seoRepo";
 import { getPublicConfig } from "@/lib/repo";
-import { packagePromoLink, packageQrDataUrl } from "@/lib/qr";
+import { packageQrDataUrl } from "@/lib/qr";
 import {
   absoluteUrl,
   breadcrumbJsonLd,
@@ -89,9 +89,6 @@ export default async function ParkPage({ params }: PageProps) {
   const { park, packages, nearby, shareCode } = data;
   const lowest = cheapestMonthly(packages);
   const cheapest = packages[0];
-  const promoLink = cheapest
-    ? packagePromoLink(park.parkCode, cheapest.sourcePackageId, shareCode)
-    : "";
   const qr = cheapest
     ? packageQrDataUrl(park.parkCode, cheapest.sourcePackageId, shareCode)
     : "";
@@ -232,10 +229,10 @@ export default async function ParkPage({ params }: PageProps) {
         </section>
       ) : null}
 
-      {promoLink ? (
+      {qr ? (
         <section className="card p-4 text-center" aria-labelledby="qr-title">
           <h2 id="qr-title" className="text-sm font-semibold">
-            办理这个套餐
+            扫码办理
           </h2>
           <p className="mt-1 text-[11px] text-muted">
             {[cheapest?.typeLabel, cheapest?.period].filter(Boolean).join(" · ")}
@@ -243,31 +240,22 @@ export default async function ParkPage({ params }: PageProps) {
             ，支付后当天生效
           </p>
 
-          {/* 手机：直接点进官方页面，不用先出码再扫 */}
-          <div className="mt-3 sm:hidden">
-            <a
-              href={promoLink}
-              target="_blank"
-              rel="noreferrer"
-              className="btn-primary w-full py-2.5 text-sm"
-            >
-              打开官方页面办理
-            </a>
-            <p className="mt-1.5 text-[11px] text-muted">跳转后在微信里完成支付，名额与价格以官方页面为准</p>
-          </div>
-
-          {/* PC：没有微信登录态，扫码是唯一顺的路径 */}
-          <div className="mx-auto mt-3 hidden w-fit rounded-xl border border-border bg-white p-2 sm:block">
+          {/* 链接在微信里点不开（只会跳小程序），只能出码让人扫/长按识别 */}
+          <div className="mx-auto mt-3 w-fit rounded-xl border border-border bg-white p-2">
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
               src={qr}
               alt={`${park.name}停车月卡办理二维码`}
-              className="block h-44 w-44"
-              width={176}
-              height={176}
+              className="block h-52 w-52"
+              width={208}
+              height={208}
             />
-            <p className="mt-1 max-w-[176px] text-center text-[11px] text-muted">微信扫一扫办理</p>
           </div>
+
+          <p className="mt-2 text-xs text-muted">微信「扫一扫」办理；在微信里打开本页可直接长按识别</p>
+          <p className="mt-1 text-[11px] leading-relaxed text-muted">
+            手机浏览器打开的话：截图保存，再到微信「扫一扫 → 相册」里选这张图。
+          </p>
 
           <p className="mt-3 text-[11px] leading-relaxed text-muted">
             本站不代收费用，付款在捷停车官方页面完成；
