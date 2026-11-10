@@ -70,7 +70,8 @@ export default function LocationSheet({
                 </Option>
               ))}
             </Section>
-          ) : (
+          ) : city ? null : (
+            // 已经选过城市的，哪怕暂时没有区域数据也别提示「先选城市」
             <p className="mt-4 text-[11px] text-muted">先选城市，再选区域</p>
           )}
         </div>
