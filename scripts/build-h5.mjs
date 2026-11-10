@@ -1,21 +1,22 @@
 #!/usr/bin/env node
 /**
- * 小红书小工具构建：jtc.db → 全城市数据/二维码 → minitool/dist → zip
- * 打包规范：minitool-zip-builder SKILL（zip-artifact-spec / device-capabilities /
- * js-compatibility / css-compatibility / performance-budget / mini-tool-manifest）
+ * 静态 H5 构建：一份源（minitool/src）→ 按平台产出不同的包。
+ * 目前两个目标：
+ *   xhs  小红书小工具：minitool/dist + mini_tool.json + minitool-zip-builder 审计
+ *   toy  B站 Toy：platforms/toy/dist（根目录 index.html），不需要小红书清单与审计
  *
  * 多城市结构（官方 §2.7 静态资源外移）：
- *   minitool/dist/index.html            入口（根目录）
- *   minitool/dist/{app,style,data,qr-data}.{js,css}   主包文件（入口不进 assets/）
+ *   <dist>/index.html            入口（必须在根目录，两个平台都认）
+ *   <dist>/{app,style,data,qr-data}.{js,css}   主包文件（入口不进 assets/）
  *       data.js = window.__JTC_INDEX__（130 城索引）+ window.__JTC_DATA__（默认城市数据）
- *   minitool/dist/assets/city-*.js      各城市数据（参与平台外移，切换时动态加载）
- *   minitool/dist/mini_tool.json        高消耗能力标记
- *   minitool/dist/zhao-tingche-minitool.zip   上传包
+ *   <dist>/assets/city-*.js      各城市数据（参与平台外移，切换时动态加载）
+ *   <dist>/mini_tool.json        （仅 xhs）高消耗能力标记
  *
  * 用法：
- *   node --no-warnings scripts/build-minitool.mjs                       默认内联深圳市
- *   node --no-warnings scripts/build-minitool.mjs --city 广州市          内联城市改为广州
- *   node --no-warnings scripts/build-minitool.mjs --share-code USC…     覆盖兜底码 shareCode
+ *   node --no-warnings scripts/build-h5.mjs --target xhs            默认目标，内联深圳市
+ *   node --no-warnings scripts/build-h5.mjs --target toy            出 B站 Toy 包
+ *   node --no-warnings scripts/build-h5.mjs --city 广州市           内联城市改为广州
+ *   node --no-warnings scripts/build-h5.mjs --snapshot data/jtc-snapshot.json
  */
 
 import { DatabaseSync } from "node:sqlite";
@@ -27,8 +28,6 @@ import QRCode from "qrcode";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const SRC_DB = resolve(ROOT, "data/jtc.db");
-const SRC_DIR = resolve(ROOT, "minitool/src");
-const DIST = resolve(ROOT, "minitool/dist");
 const HOME = process.env.USERPROFILE || process.env.HOME;
 const BUILDER = resolve(HOME ?? "", ".agents/skills/minitool-zip-builder");
 
@@ -37,6 +36,34 @@ const argValue = (name) => {
   const i = args.indexOf(name);
   return i >= 0 ? args[i + 1] : undefined;
 };
+
+/** 各平台的差异只有：产物目录、包名、要不要小红书清单、要不要跑小红书审计 */
+const TARGETS = {
+  xhs: {
+    label: "小红书小工具",
+    dist: "minitool/dist",
+    zipName: "zhao-tingche-minitool.zip",
+    platformManifest: true,
+    xhsAudit: true,
+  },
+  toy: {
+    label: "B站 Toy",
+    dist: "platforms/toy/dist",
+    zipName: "zhao-tingche-toy.zip",
+    platformManifest: false,
+    xhsAudit: false,
+  },
+};
+
+const targetName = argValue("--target") ?? "xhs";
+const TARGET = TARGETS[targetName];
+if (!TARGET) {
+  console.error(`未知目标：${targetName}，可选：${Object.keys(TARGETS).join(" / ")}`);
+  process.exit(1);
+}
+
+const SRC_DIR = resolve(ROOT, "minitool/src");
+const DIST = resolve(ROOT, TARGET.dist);
 const inlineCity = argValue("--city") ?? "深圳市";
 /** 用 export-snapshot 产出的 JSON 当数据源（CI / 换机器时用，不必有本地 jtc.db） */
 const snapshotArg = argValue("--snapshot") ?? process.env.JTC_SNAPSHOT;
@@ -130,7 +157,7 @@ if (snapshotArg) {
   if (!existsSync(SRC_DB)) {
     console.error(`找不到源库：${SRC_DB}`);
     console.error("先跑数据抓取：node --no-warnings scripts/crawl-jtc.mjs");
-    console.error("或者用快照：node scripts/build-minitool.mjs --snapshot data/jtc-snapshot.json");
+    console.error(`或者用快照：node scripts/build-h5.mjs --target ${targetName} --snapshot data/jtc-snapshot.json`);
     process.exit(1);
   }
   const db = new DatabaseSync(SRC_DB, { readOnly: true });
@@ -316,30 +343,43 @@ if (violations.length) {
 }
 console.log("禁用 API 扫描：通过（0 命中）");
 
-/* ------------------------------ 5. mini_tool.json（官方脚本，false：无 Worker/WASM/离屏/引擎） ------------------------------ */
+/* ------------------------------ 5. 平台清单（仅小红书：mini_tool.json，false：无 Worker/WASM/离屏/引擎） ------------------------------ */
 
-const writeManifest = resolve(BUILDER, "scripts/write_manifest.mjs");
-if (existsSync(writeManifest)) {
-  execFileSync("node", [writeManifest, DIST, "false"]);
-  console.log("mini_tool.json：false（无高消耗能力）");
+if (TARGET.platformManifest) {
+  const writeManifest = resolve(BUILDER, "scripts/write_manifest.mjs");
+  if (existsSync(writeManifest)) {
+    execFileSync("node", [writeManifest, DIST, "false"]);
+    console.log("mini_tool.json：false（无高消耗能力）");
+  } else {
+    // 官方脚本不在（CI / 换机器）时落一份等价清单：本工具无 Worker/WASM/离屏/引擎
+    writeFileSync(resolve(DIST, "mini_tool.json"), JSON.stringify({ is_high_consumption_scene: false }));
+    console.warn(`未找到官方 write_manifest.mjs（${BUILDER}），已写内置等价清单`);
+  }
 } else {
-  // 官方脚本不在（CI / 换机器）时落一份等价清单：本工具无 Worker/WASM/离屏/引擎
-  writeFileSync(resolve(DIST, "mini_tool.json"), JSON.stringify({ is_high_consumption_scene: false }));
-  console.warn(`未找到官方 write_manifest.mjs（${BUILDER}），已写内置等价清单`);
+  console.log(`${TARGET.label} 不需要 mini_tool.json，跳过`);
 }
 
 /* ------------------------------ 6. 官方审计 → zip → 审计 zip ------------------------------ */
 
-const audit = resolve(BUILDER, "scripts/audit_artifact.mjs");
-if (existsSync(audit)) {
+const audit = TARGET.xhsAudit ? resolve(BUILDER, "scripts/audit_artifact.mjs") : "";
+if (audit && existsSync(audit)) {
   console.log("--- 官方审计：dist 目录 ---");
   execFileSync("node", [audit, DIST], { stdio: "inherit" });
-} else {
+} else if (TARGET.xhsAudit) {
   console.warn("警告：未找到官方 audit_artifact.mjs，未运行自动审计");
 }
 
-const zipPath = resolve(DIST, "zhao-tingche-minitool.zip");
-const zipEntries = ["index.html", "app.js", "style.css", "data.js", "qr-data.js", "qr-encoder.js", "mini_tool.json", "assets"];
+const zipPath = resolve(DIST, TARGET.zipName);
+const zipEntries = [
+  "index.html",
+  "app.js",
+  "style.css",
+  "data.js",
+  "qr-data.js",
+  "qr-encoder.js",
+  ...(TARGET.platformManifest ? ["mini_tool.json"] : []),
+  "assets",
+];
 if (process.platform === "win32") {
   execFileSync("powershell", [
     "-NoProfile", "-Command",
@@ -355,6 +395,7 @@ if (existsSync(audit)) {
   execFileSync("node", [audit, zipPath], { stdio: "inherit" });
 }
 
+console.log(`目标：${TARGET.label}（${TARGET.dist}）`);
 console.log(`城市：${cityList.length} 个｜车场 ${parks.size}｜套餐 ${cityList.reduce((s, x) => s + x.p, 0)}${skippedDeposit ? `｜已过滤付定金 ${skippedDeposit} 条` : ""}`);
 console.log(`内联城市：${inlineCity}（data.js ${(JSON.stringify(inline.parks).length / 1024).toFixed(0)}KB）｜城市分包 ${cityFiles} 个共 ${(cityBytes / 1024).toFixed(0)}KB`);
 console.log(`兜底码：${globalUrl}`);

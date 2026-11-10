@@ -11,7 +11,7 @@
  *   node scripts/export-snapshot.mjs                       # → data/jtc-snapshot.json
  *   node scripts/export-snapshot.mjs --out snapshots/a.json
  *
- * 产物可以直接交给：node scripts/build-minitool.mjs --snapshot data/jtc-snapshot.json
+ * 产物可以直接交给：node scripts/build-h5.mjs --target xhs|toy --snapshot data/jtc-snapshot.json
  */
 import { DatabaseSync } from "node:sqlite";
 import { writeFileSync, mkdirSync, existsSync } from "node:fs";

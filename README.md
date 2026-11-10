@@ -27,7 +27,7 @@ npm run db:push -- data/jtc.db
 `INSERT OR REPLACE`，最后逐表对行数。
 
 `data/app.db` 是业务库，`data/jtc.db` 是官方选品池原始库（`enrich-jtc` / `import-jtc` /
-`build-minitool` 都依赖它），两者都不入库。`public/uploads/` 里的二维码图片同样不入库，
+`build-h5` 都依赖它），两者都不入库。`public/uploads/` 里的二维码图片同样不入库，
 线上通过 Docker 卷持久化。
 
 ## 数据：爬取 → 清洗导入
@@ -65,15 +65,18 @@ node --no-warnings scripts/import-jtc.mjs --city 深圳市   # 只导一个城�
 按车场名推断业态（商场/写字楼/医院/景区/社区/交通枢纽）、官方 `<居住推荐>` 等标签转成适用人群。
 已上传的专属码不会被重导入覆盖。
 
-## 小红书小工具产线
+## 静态 H5 产线（小红书小工具 / B站 Toy）
 
-小工具是离线 H5 包，数据必须构建期就烙进去，所以走「快照 → 打包」：
+两个平台都是「离线静态包 + 平台审核」，所以共用一份源 `minitool/src`，只按目标产出不同的目录/包名：
 
 ```bash
-npm run snapshot                    # data/jtc.db → data/jtc-snapshot.json
-npm run minitool -- --snapshot data/jtc-snapshot.json   # → minitool/dist/*.zip
-npm run minitool -- --snapshot data/jtc-snapshot.json --city 广州市
+npm run snapshot                                        # data/jtc.db → data/jtc-snapshot.json
+npm run minitool -- --snapshot data/jtc-snapshot.json   # 小红书 → minitool/dist/*.zip
+npm run toy -- --snapshot data/jtc-snapshot.json        # B站 Toy → platforms/toy/dist/*.zip
 ```
+
+- xhs：带 `mini_tool.json`，跑 minitool-zip-builder 的审计；
+- toy：不带平台清单、不跑小红书审计，zip 根目录直接是 `index.html`（详见 `platforms/toy/README.md`）。
 
 - 快照只留打包要用的字段（`raw` 压缩成 `packageInterval` 一个数），59MB 原始池 → 10.6MB JSON，
   可以放到任意能直链下载的地方；

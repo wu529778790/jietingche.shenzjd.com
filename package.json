@@ -9,7 +9,8 @@
     "lint": "eslint",
     "db:push": "node scripts/push-to-turso.mjs",
     "snapshot": "node --no-warnings scripts/export-snapshot.mjs",
-    "minitool": "node --no-warnings scripts/build-minitool.mjs"
+    "minitool": "node --no-warnings scripts/build-h5.mjs --target xhs",
+    "toy": "node --no-warnings scripts/build-h5.mjs --target toy"
   },
   "dependencies": {
     "@libsql/client": "^0.18.0",
