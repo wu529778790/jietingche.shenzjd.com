@@ -54,3 +54,6 @@ data/*.log
 
 # 本地调试产物
 /.playwright-mcp/
+
+# 小工具构建产物（由 scripts/build-minitool.mjs 从 minitool/src + data/jtc.db 生成）
+/minitool/dist/

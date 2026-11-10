@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport"
+        content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <title>找停车 · 月卡套餐直办</title>
+  <style>
+    /* 官方模板全局重置（zip-artifact-spec §5，Chrome 61 基线） */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI",
+                   "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+      -webkit-font-smoothing: antialiased;
+      -webkit-tap-highlight-color: transparent;
+      -webkit-user-select: none;
+      user-select: none;
+      -webkit-touch-callout: none;
+    }
+    /* 搜索框需要允许选中输入内容 */
+    input { -webkit-user-select: text; user-select: text; }
+  </style>
+  <link rel="stylesheet" href="./style.css" />
+</head>
+<body>
+  <header class="hd">
+    <div class="hd-brand">找停车<span id="cityTag"></span></div>
+    <button id="btnLoc" class="btn-loc" type="button">离我最近</button>
+  </header>
+
+  <div class="toolbar">
+    <div class="search-wrap">
+      <input id="kw" class="search" type="search" placeholder="搜车场名 / 地址，如：中心书城" autocomplete="off" />
+    </div>
+    <div class="sortbar">
+      <button id="btnCity" class="filter-btn" type="button">深圳</button>
+      <button id="btnFilter" class="filter-btn" type="button">筛选<span id="filterBadge" class="filter-badge" hidden></span></button>
+      <button id="sortDist" class="sort" type="button">距离优先</button>
+      <button id="sortPrice" class="sort on" type="button">价格优先</button>
+    </div>
+  </div>
+
+  <div id="notice" class="notice" hidden></div>
+
+  <main id="list" class="list"></main>
+  <button id="more" class="more" type="button" hidden>加载更多</button>
+
+  <footer class="ft">
+    数据更新 <span id="upd"></span> · 价格与规则以官方页为准
+  </footer>
+
+  <div id="cpanel" class="mask" hidden>
+    <div class="sheet">
+      <div class="sheet-hd">
+        <div class="sh-park">选择城市</div>
+        <button id="cClose" class="sh-close" type="button">关闭</button>
+      </div>
+      <div class="city-search"><input id="cityKw" class="search" type="search" placeholder="搜城市名，如：广州" autocomplete="off" /></div>
+      <div id="cityBody"></div>
+    </div>
+  </div>
+
+  <div id="fpanel" class="mask" hidden>
+    <div class="sheet">
+      <div class="sheet-hd">
+        <div class="sh-park">筛选</div>
+        <button id="fClose" class="sh-close" type="button">关闭</button>
+      </div>
+      <div id="fbody"></div>
+      <div class="fbtns">
+        <button id="fReset" class="f-reset" type="button">重置</button>
+        <button id="fApply" class="f-apply" type="button">确定</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="sheet" class="mask" hidden>
+    <div class="sheet">
+      <div class="sheet-hd">
+        <div id="shPark" class="sh-park"></div>
+        <button id="shClose" class="sh-close" type="button">关闭</button>
+      </div>
+      <div id="shPkg" class="sh-pkg"></div>
+      <div class="qr-box"><img id="shQr" alt="推广二维码" /></div>
+      <button id="shSave" class="btn-save" type="button">保存二维码到相册</button>
+      <div id="shTip" class="sh-tip"></div>
+      <div class="sh-guide">保存二维码后，打开微信「扫一扫」→ 右上角「相册」选这张码即可办理</div>
+    </div>
+  </div>
+
+  <script src="./qr-encoder.js"></script>
+  <script src="./qr-data.js"></script>
+  <script src="./data.js"></script>
+  <script src="./app.js"></script>
+</body>
+</html>
