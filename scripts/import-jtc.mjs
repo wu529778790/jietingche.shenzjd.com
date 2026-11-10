@@ -22,6 +22,7 @@ import { existsSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { COLUMN_MIGRATIONS, INDEX_SQL, TABLE_SQL } from "../src/lib/schema.ts";
+import { cleanPackageName, cleanRuleSummary } from "../src/lib/packageText.ts";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(__dirname, "..");
@@ -213,7 +214,6 @@ for (const park of parks.values()) {
       name.replace(/停车场|车库|车场|地下|地面/g, ""),
       park.district,
       park.address.replace(/\(.*?\)|（.*?）/g, ""),
-      ...tags,
     ]),
   ].filter(Boolean);
   const industryText = `${name} ${park.address} ${[...park.names].join(" ")}`;
@@ -261,7 +261,7 @@ for (const park of parks.values()) {
       args: [
         `jtc_${packageId}`,
         parkId,
-        (row.package_name ?? "").trim() || typeLabel,
+        cleanPackageName(row.package_name, name) || typeLabel,
         period,
         durationDays,
         price,
@@ -270,7 +270,7 @@ for (const park of parks.values()) {
         typeLabel,
         cleanName(row.duration_label),
         originPrice,
-        (row.rule_summary ?? "").trim(),
+        cleanRuleSummary(row.rule_summary),
         packageId,
         toTimestamp(row.fetched_at),
       ],

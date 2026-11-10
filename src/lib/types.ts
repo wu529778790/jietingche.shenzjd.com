@@ -25,32 +25,37 @@ export const PACKAGE_TYPES = ["月卡", "季卡", "半年卡", "年卡", "日卡
 export const SORT_OPTIONS = [
   { value: "recommend", label: "推荐" },
   { value: "distance", label: "离我最近" },
-  { value: "price", label: "价格最低" },
+  { value: "price", label: "每月最省" },
 ] as const;
 
 export type SortValue = (typeof SORT_OPTIONS)[number]["value"];
 
-/** 运营重点城市：购买力强、停车难，没选城市/没定位时优先展示 */
+/**
+ * 重点城市：没选城市/没定位时优先展示。
+ * 顺序按官方池的真实供给排（车场数），不是按行政级别——
+ * 按级别排会把北京（167 个车场）顶到首位，首屏比深圳（1509 个）空一个数量级。
+ */
 export const FOCUS_CITIES = [
-  "北京市", "上海市", "广州市", "深圳市",
-  "杭州市", "南京市", "成都市", "武汉市", "西安市", "重庆市", "天津市",
-  "苏州市", "郑州市", "长沙市", "青岛市", "合肥市", "福州市", "厦门市",
-  "济南市", "昆明市", "南昌市", "沈阳市", "大连市", "东莞市", "佛山市",
+  "深圳市", "广州市", "上海市", "佛山市", "南京市", "东莞市",
+  "中山市", "惠州市", "成都市", "重庆市", "杭州市", "天津市",
+  "厦门市", "珠海市", "北京市", "福州市", "西安市", "长沙市",
+  "南昌市", "江门市", "苏州市", "合肥市", "宁波市", "无锡市",
+  "济南市", "海口市", "昆明市", "肇庆市", "太原市", "常州市",
 ] as const;
 
-/** 首页快捷城市入口 */
+/** 首页快捷城市入口：知名度高、且供给撑得住首屏的城市 */
 export const HOT_CITIES = [
-  "北京市", "上海市", "广州市", "深圳市",
-  "杭州市", "南京市", "成都市", "武汉市", "西安市",
+  "深圳市", "广州市", "上海市", "北京市", "成都市",
+  "重庆市", "杭州市", "南京市", "东莞市",
 ] as const;
 
-/** 价格档位（分），用于筛选栏 */
+/** 月均价格档位（分），用于筛选栏：卡种混在一起时，按月均预算筛才可比 */
 export const PRICE_STEPS = [
   { value: 0, label: "不限" },
-  { value: 10000, label: "¥100 内" },
-  { value: 20000, label: "¥200 内" },
-  { value: 30000, label: "¥300 内" },
-  { value: 50000, label: "¥500 内" },
+  { value: 10000, label: "月均 ¥100 内" },
+  { value: 20000, label: "月均 ¥200 内" },
+  { value: 30000, label: "月均 ¥300 内" },
+  { value: 50000, label: "月均 ¥500 内" },
 ] as const;
 
 export interface CarPark {
@@ -120,32 +125,16 @@ export function yuan(cent: number): string {
   return (cent / 100).toFixed(2).replace(/\.00$/, "");
 }
 
-/**
- * 官方套餐名自带车场前缀，如「洪大服装世界城（<畅停无忧>全天套餐_1月）」，
- * 卡片里已经显示车场名了，这里把前缀裁掉只留套餐本身。
- */
-export function shortPackageName(parkName: string, packageName: string): string {
-  if (!parkName || !packageName || !packageName.startsWith(parkName)) return packageName;
-  const rest = packageName.slice(parkName.length).trim();
-  const wrapped = rest.match(/^[（(](.+)[）)]$/);
-  if (wrapped) return wrapped[1].trim();
-  return rest.replace(/^[·\-—、,，\s]+/, "").trim() || packageName;
-}
-
-/** 规则摘要里会叠出「每天 每天 00:00-23:59」，展示时把重复前缀压掉 */
-export function tidyRuleSummary(summary: string): string {
-  return summary
-    .split("/")
-    .map((part) => {
-      const words = part.trim().split(/\s+/).filter(Boolean);
-      if (words.length < 3) return words.join(" ");
-      let i = 1;
-      while (i < words.length && words[i] === words[0]) i += 1;
-      return [words[0], ...words.slice(i)].join(" ");
-    })
-    .filter(Boolean)
-    .join(" / ");
-}
+/** 套餐文案与价格口径统一收口在 packageText.ts，这里 re-export 保持老调用不变 */
+export {
+  cleanPackageName,
+  cleanRuleSummary,
+  isLongTerm,
+  LONG_TERM_DAYS,
+  monthlyPrice,
+  shortPackageName,
+  tidyRuleSummary,
+} from "./packageText";
 
 /** 两点球面距离，单位米 */
 export function distanceMeters(lat1: number, lng1: number, lat2: number, lng2: number): number {
