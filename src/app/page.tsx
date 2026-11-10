@@ -73,8 +73,6 @@ export default function HomePage() {
   const [coords, setCoords] = useState<Coords | null>(null);
   const [geoState, setGeoState] = useState<"idle" | "locating" | "error">("idle");
   const [geoError, setGeoError] = useState("");
-  /** 定位有结论（成功/失败/超时兜底）后才发首批搜索，避免列表先按“推荐”排一遍再跳成“按距离” */
-  const [geoReady, setGeoReady] = useState(false);
 
   const [facets, setFacets] = useState<Facets>(EMPTY_FACETS);
   /** 分佣码：弹层里现场生成套餐直达码用 */
@@ -91,6 +89,8 @@ export default function HomePage() {
   const reqId = useRef(0);
   /** 用户手动选过城市后，定位反查到的城市不要覆盖他的选择 */
   const cityTouched = useRef(false);
+  /** 刚拿到定位，下一趟请求用它把旧列表清掉、换成骨架屏，避免列表硬跳 */
+  const geoRefresh = useRef(false);
 
   useEffect(() => {
     fetch("/api/config")
@@ -127,8 +127,16 @@ export default function HomePage() {
     async (targetPage: number, append: boolean) => {
       const id = reqId.current + 1;
       reqId.current = id;
-      if (append) setLoadingMore(true);
-      else setLoading(true);
+      if (append) {
+        setLoadingMore(true);
+      } else {
+        setLoading(true);
+        // 定位刚回来：先把旧列表清掉走骨架屏，不然首屏数据会硬跳一下
+        if (geoRefresh.current) {
+          geoRefresh.current = false;
+          setParks([]);
+        }
+      }
       try {
         const params = new URLSearchParams();
         if (keyword.trim()) params.set("q", keyword.trim());
@@ -163,13 +171,13 @@ export default function HomePage() {
     [keyword, city, district, industry, type, slot, maxPrice, sort, coords],
   );
 
+  // 不等定位：条件一变就先出结果，定位回来再刷新一次
   useEffect(() => {
-    if (!geoReady) return;
     const timer = setTimeout(() => {
       fetchList(1, false);
     }, 250);
     return () => clearTimeout(timer);
-  }, [fetchList, geoReady]);
+  }, [fetchList]);
 
   /** 定位成功后再反查城市：默认把结果锁在所在城市，不然「价格最低」会按全国排 */
   const resolveCity = useCallback(async (coords: Coords) => {
@@ -177,13 +185,11 @@ export default function HomePage() {
       const res = await fetch(`/api/locate?lat=${coords.lat}&lng=${coords.lng}`);
       const json = (await res.json()) as { data?: { city?: string } };
       const hit = json?.data?.city ?? "";
-      if (!hit) return;
-      writeGeoCache({ ...coords, city: hit });
-      if (cityTouched.current) return;
-      setCity(hit);
-      setDistrict("");
+      if (hit) writeGeoCache({ ...coords, city: hit });
+      return hit;
     } catch {
       // 反查失败就保持「全国」，不挡主流程
+      return "";
     }
   }, []);
 
@@ -197,25 +203,28 @@ export default function HomePage() {
           setCity(cached.city);
           setDistrict("");
         }
-        setGeoReady(true);
         return;
       }
       if (typeof navigator === "undefined" || !navigator.geolocation) {
         setGeoState("error");
         setGeoError("当前浏览器不支持定位，直接选城市吧");
-        setGeoReady(true);
         return;
       }
       setGeoState("locating");
       setGeoError("");
       navigator.geolocation.getCurrentPosition(
-        (pos) => {
+        async (pos) => {
           const next = { lat: pos.coords.latitude, lng: pos.coords.longitude };
-          setCoords(next);
           writeGeoCache(next);
+          // 先反查城市再一次性写回坐标，避免「坐标变一次、城市变一次」连跳两次
+          const hit = await resolveCity(next);
+          geoRefresh.current = true;
+          if (hit && !cityTouched.current) {
+            setCity(hit);
+            setDistrict("");
+          }
+          setCoords(next);
           setGeoState("idle");
-          setGeoReady(true);
-          void resolveCity(next);
         },
         (err) => {
           setGeoState("error");
@@ -224,7 +233,6 @@ export default function HomePage() {
               ? "定位权限被拒绝了，手动选城市吧"
               : "没拿到你的位置，点这里重试或手动选城市",
           );
-          setGeoReady(true);
         },
         { timeout: 10000, maximumAge: 300000 },
       );
@@ -232,16 +240,11 @@ export default function HomePage() {
     [resolveCity],
   );
 
-  // 进来就按当前位置找：有缓存直接生效，没有就静默请求一次浏览器定位
+  // 进来先按默认条件出内容，定位有结果后再刷新一版附近的
   useEffect(() => {
-    // 放到下一个 tick 再请求，让首屏先渲染出来，权限弹窗不至于卡住白屏
+    // 放到下一个 tick，让首屏先渲染出来，权限弹窗不至于卡住白屏
     const kick = setTimeout(locate, 0);
-    // 最多等 1.2 秒：用户忽略权限弹窗时首页不能一直空着
-    const fallback = setTimeout(() => setGeoReady(true), 1200);
-    return () => {
-      clearTimeout(kick);
-      clearTimeout(fallback);
-    };
+    return () => clearTimeout(kick);
   }, [locate]);
 
   /** 筛选面板里控制的那几项，用来回填面板和算「筛选」上的角标 */
@@ -297,9 +300,7 @@ export default function HomePage() {
             className="w-full rounded-xl border border-white/40 bg-white px-3.5 py-3 text-sm text-foreground placeholder:text-muted focus:outline-none"
           />
         </div>
-        {geoState === "locating" ? (
-          <div className="mt-2 text-[11px] text-white/70">正在获取你的位置…</div>
-        ) : geoState === "error" ? (
+        {geoState === "error" ? (
           <div className="mt-2 flex items-center gap-2 text-[11px] text-white/70">
             <span>{geoError}</span>
             <button
@@ -399,8 +400,10 @@ export default function HomePage() {
         </div>
       ) : null}
 
-      {parks.map((park) => (
-        <article key={park.id} className="card p-3">
+      {/* 筛选/翻页时列表整体淡一点，明确「正在换结果」，但不打断浏览 */}
+      <div className={loading && parks.length > 0 ? "space-y-3 opacity-60" : "space-y-3"}>
+        {parks.map((park) => (
+          <article key={park.id} className="card p-3">
           <div className="flex items-start justify-between gap-2">
             <div className="min-w-0">
               <h2 className="truncate text-sm font-semibold">{park.name}</h2>
@@ -456,8 +459,9 @@ export default function HomePage() {
               </span>
             ) : null}
           </div>
-        </article>
-      ))}
+          </article>
+        ))}
+      </div>
 
       {parks.length > 0 && parks.length < total ? (
         <button
