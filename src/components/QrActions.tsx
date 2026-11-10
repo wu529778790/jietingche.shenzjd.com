@@ -14,10 +14,14 @@ import { useCallback, useState, useSyncExternalStore } from "react";
 
 const subscribe = () => () => {};
 
+/** 只有手机微信才支持长按识别，PC 微信走扫码分支 */
 function useIsWechat(): boolean {
   return useSyncExternalStore(
     subscribe,
-    () => /MicroMessenger/i.test(navigator.userAgent),
+    () => {
+      const ua = navigator.userAgent;
+      return /MicroMessenger/i.test(ua) && /Mobile|Android|iPhone|iPad/i.test(ua);
+    },
     () => false,
   );
 }
@@ -30,9 +34,12 @@ function useIsMobile(): boolean {
   );
 }
 
-function isIOS(): boolean {
-  if (typeof navigator === "undefined") return false;
-  return /iPhone|iPad|iPod/i.test(navigator.userAgent);
+function useIsIOS(): boolean {
+  return useSyncExternalStore(
+    subscribe,
+    () => /iPhone|iPad|iPod/i.test(navigator.userAgent),
+    () => false,
+  );
 }
 
 /** 二维码是 GIF，转成 PNG 再下载，微信相册识别更稳 */
@@ -66,6 +73,7 @@ interface Props {
 
 export default function QrActions({ qr, filename, compact = false }: Props) {
   const inWechat = useIsWechat();
+  const isIOSDevice = useIsIOS();
   const isMobile = useIsMobile();
   const [saved, setSaved] = useState(false);
 
@@ -113,14 +121,28 @@ export default function QrActions({ qr, filename, compact = false }: Props) {
     );
   }
 
-  // 手机浏览器：不能长按识别，只能存图后用微信扫一扫相册
+  // iPhone/iPad：download 属性不生效，点了只会打开图片预览（页面被盖住，看不到引导），
+  // 直接让用户长按二维码存相册，Safari 原生支持
+  if (isIOSDevice) {
+    return (
+      <div className="text-center">
+        <p className="text-xs text-muted">长按上方二维码 →「存储到照片」</p>
+        <ol className="mt-2 space-y-0.5 text-left text-[11px] leading-relaxed text-muted">
+          <li>1. 打开微信 → 右上角「+」→「扫一扫」</li>
+          <li>2. 点右下角「相册」，选刚才存的那张图</li>
+        </ol>
+      </div>
+    );
+  }
+
+  // 安卓等手机浏览器：download 可用，存图后用微信扫一扫相册
   return (
     <div className="text-center">
       <button type="button" className="btn-ghost w-full py-2 text-sm" onClick={save}>
         {saved ? "已保存，去微信扫一扫" : "下载二维码"}
       </button>
       <ol className="mt-2 space-y-0.5 text-left text-[11px] leading-relaxed text-muted">
-        <li>1. 点上面按钮，把二维码存到相册{isIOS() && saved ? "（已打开图片的话，长按 → 存储到照片）" : ""}</li>
+        <li>1. 点上面按钮，把二维码存到相册</li>
         <li>2. 打开微信 → 右上角「+」→「扫一扫」</li>
         <li>3. 点右下角「相册」，选这张二维码</li>
       </ol>
