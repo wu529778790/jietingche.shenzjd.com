@@ -171,6 +171,8 @@ jobs:
                 echo "TURSO_AUTH_TOKEN=${{ secrets.TURSO_AUTH_TOKEN }}"
                 echo "ADMIN_PASSWORD=${{ secrets.ADMIN_PASSWORD }}"
                 echo "ALLOWED_ORIGINS=${{ secrets.ALLOWED_ORIGINS || '*' }}"
+                # 分佣 shareCode：前端拼套餐直达码用，没配就走代码里的兜底值
+                echo "JTC_SHARE_CODE=${{ secrets.JTC_SHARE_CODE }}"
               } | sudo tee "$SITE_DIR/.env" >/dev/null
               sudo chmod 600 "$SITE_DIR/.env"
             fi
