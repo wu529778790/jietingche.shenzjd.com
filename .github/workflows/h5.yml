@@ -3,9 +3,9 @@ name: H5 Build
 # 静态包产线：快照 → 打包 zip（产物留档），xhs / toy 共用一套源。
 # 送审不在这里做——redapp / toy 都要本机登录、还要人看预览，交给人工。
 #
-# 快照从哪来：本地有原始池的时候跑 `npm run snapshot`，
-# 把 data/jtc-snapshot.json 传到任意可直链下载的地方（服务器静态目录 / 对象存储 / Release 附件），
-# 地址放进 secret SNAPSHOT_URL，或手动触发时填 snapshot_url。
+# 快照从哪来：本地跑 `npm run snapshot` 生成，再 `npm run snapshot:publish` 发成一个
+# snapshot-* 的 GitHub Release；本 workflow 默认就下它的 jtc-snapshot.json 附件，
+# 不需要配 secret。想临时换外部地址，填 snapshot_url 或配 secret SNAPSHOT_URL。
 
 on:
   workflow_dispatch:
@@ -41,14 +41,24 @@ jobs:
 
       - name: 下载数据快照
         env:
+          GH_TOKEN: ${{ github.token }}
           SNAPSHOT_URL: ${{ inputs.snapshot_url || secrets.SNAPSHOT_URL }}
         run: |
-          if [ -z "$SNAPSHOT_URL" ]; then
-            echo "::error::没有快照地址：填 snapshot_url 或配 secret SNAPSHOT_URL"
-            exit 1
-          fi
           mkdir -p data
-          curl -fsSL "$SNAPSHOT_URL" -o data/jtc-snapshot.json
+          if [ -n "$SNAPSHOT_URL" ]; then
+            echo "快照来源：$SNAPSHOT_URL"
+            curl -fsSL "$SNAPSHOT_URL" -o data/jtc-snapshot.json
+          else
+            # 默认走最近的一个 snapshot-* Release（本机 npm run snapshot:publish 发的）
+            TAG=$(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=50" \
+              --jq '[.[] | select(.tag_name | startswith("snapshot-"))][0].tag_name')
+            if [ -z "$TAG" ] || [ "$TAG" = "null" ]; then
+              echo "::error::没找到 snapshot-* 的 Release，先在本机跑 npm run snapshot:publish"
+              exit 1
+            fi
+            echo "快照来源：Release $TAG"
+            gh release download "$TAG" --pattern jtc-snapshot.json --output data/jtc-snapshot.json --clobber
+          fi
           node -e "const s=require('./data/jtc-snapshot.json');console.log('快照', s.rows.length, '条套餐 /', s.cities.length, '个城市 /', s.generatedAt)"
 
       - name: 打包

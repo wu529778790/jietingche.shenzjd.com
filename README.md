@@ -71,9 +71,15 @@ node --no-warnings scripts/import-jtc.mjs --city 深圳市   # 只导一个城�
 
 ```bash
 npm run snapshot                                        # data/jtc.db → data/jtc-snapshot.json
+npm run snapshot:publish                                # 传到 GitHub Release（tag: snapshot-YYYYMMDD-HHmm）
 npm run minitool -- --snapshot data/jtc-snapshot.json   # 小红书 → minitool/dist/*.zip
 npm run toy -- --snapshot data/jtc-snapshot.json        # B站 Toy → platforms/toy/dist/*.zip
 ```
+
+打包脚本在 CI 里跑时拿不到本地的 `data/jtc.db`，所以数据走 Release 附件：
+`h5.yml` 会用 `gh` 找最新的 `snapshot-*` Release 并下载 `jtc-snapshot.json`，**不需要配任何 secret**
+（仓库私有，附件也只有协作者能下）。要临时换地址，填 workflow 的 `snapshot_url` 或 secret `SNAPSHOT_URL` 覆盖。
+`npm run snapshot:publish -- --keep 5 --prune` 可以把历史快照只留最近 5 个。
 
 - xhs：带 `mini_tool.json`，跑 minitool-zip-builder 的审计；
 - toy：不带平台清单、不跑小红书审计，zip 根目录直接是 `index.html`（详见 `platforms/toy/README.md`）。
