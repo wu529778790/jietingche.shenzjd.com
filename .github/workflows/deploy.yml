@@ -9,17 +9,19 @@ name: Build & Deploy
 #     并且「拉不到就退出，旧容器不动」。
 #
 # 数据库在 Turso（远程 libsql），容器无状态：
-#   - 容器里不落任何业务数据，只有 public/uploads（推广码图片）需要持久化，
-#     挂到站点目录下的 uploads/。
-#   - TURSO_* 与 ADMIN_PASSWORD 通过服务器上的 .env 注入（--env-file），
-#     不进镜像；首次部署若 .env 不存在，会用 GitHub secrets 生成一份。
+#   - 容器里不落任何业务数据，需要持久化的只有 data/uploads，挂到 /app/public/uploads。
+#   - 所有落盘文件都收在站点目录的 data/ 下（1Panel 备份站点时一起带上）：
+#       <SITE_DIR>/data/.env     配置，chmod 600
+#       <SITE_DIR>/data/uploads  上传目录，chown 1001
+#   - TURSO_* 与 ADMIN_PASSWORD 通过 data/.env 注入（--env-file），不进镜像；
+#     首次部署若 .env 不存在，会用 GitHub secrets 生成一份。
 #
 # 首次启用前要在仓库 Settings → Secrets and variables → Actions 配好：
 #   DEPLOY_HOST          服务器地址
 #   DEPLOY_USER          SSH 用户
 #   DEPLOY_PASSWORD      SSH 密码（用密钥的话改成 DEPLOY_SSH_KEY 并换 appleboy 的 key 参数）
 #   DEPLOY_PORT          SSH 端口，可省略（默认 22）
-#   DEPLOY_SITE_DIR      站点目录，可省略（默认 /opt/jietingche）
+#   DEPLOY_SITE_DIR      站点目录，可省略（默认 1Panel 站点目录 jietingche.shenzjd.com）
 #   APP_PORT             对外端口，可省略（默认 3000）
 #   TURSO_DATABASE_URL   数据库地址
 #   TURSO_AUTH_TOKEN     数据库 token
@@ -149,7 +151,12 @@ jobs:
             set -eu
             IMAGE="ghcr.io/$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]'):latest"
             CONTAINER="jietingche"
-            SITE_DIR="${DEPLOY_SITE_DIR:-/opt/jietingche}"
+            # 站点目录跟着 1Panel 走：1Panel 备份/迁移站点时会一起带上 data/
+            SITE_DIR="${DEPLOY_SITE_DIR:-/opt/1panel/www/sites/jietingche.shenzjd.com}"
+            DATA_DIR="$SITE_DIR/data"
+            ENV_FILE="$DATA_DIR/.env"
+            UPLOADS_DIR="$DATA_DIR/uploads"
+            LEGACY_SITE_DIR="/opt/jietingche"
             APP_PORT="${APP_PORT:-3000}"
             PRECHECK="${CONTAINER}-precheck"
 
@@ -160,12 +167,27 @@ jobs:
             # 拉完立刻登出：留着这个 job 级 token 会让之后所有 pull 被打成 denied
             sudo docker logout ghcr.io || true
 
-            echo "=== 准备站点目录 ==="
-            sudo mkdir -p "$SITE_DIR/uploads"
+            echo "=== 准备数据目录 $DATA_DIR ==="
+            sudo mkdir -p "$UPLOADS_DIR"
             # 容器里以 nextjs(1001) 运行，上传目录得让它可写
-            sudo chown -R 1001:1001 "$SITE_DIR/uploads"
-            if ! sudo test -f "$SITE_DIR/.env" || [ "${REFRESH_ENV:-false}" = "true" ]; then
-              echo "生成 $SITE_DIR/.env（来自 GitHub secrets，refresh=${REFRESH_ENV:-false}）"
+            sudo chown -R 1001:1001 "$UPLOADS_DIR"
+
+            # 老版本把 .env / uploads 放在 /opt/jietingche，首次迁过来，别把 DB 配置弄丢
+            if [ "$LEGACY_SITE_DIR" != "$SITE_DIR" ] && sudo test -d "$LEGACY_SITE_DIR"; then
+              if ! sudo test -f "$ENV_FILE" && sudo test -f "$LEGACY_SITE_DIR/.env"; then
+                echo "迁移 $LEGACY_SITE_DIR/.env → $ENV_FILE"
+                sudo cp "$LEGACY_SITE_DIR/.env" "$ENV_FILE"
+                sudo chown root:root "$ENV_FILE"
+              fi
+              if sudo test -d "$LEGACY_SITE_DIR/uploads"; then
+                echo "迁移旧 uploads 内容"
+                sudo cp -rn "$LEGACY_SITE_DIR/uploads/." "$UPLOADS_DIR/" 2>/dev/null || true
+                sudo chown -R 1001:1001 "$UPLOADS_DIR"
+              fi
+            fi
+
+            if ! sudo test -f "$ENV_FILE" || [ "${REFRESH_ENV:-false}" = "true" ]; then
+              echo "生成 $ENV_FILE（来自 GitHub secrets，refresh=${REFRESH_ENV:-false}）"
               {
                 echo "TURSO_DATABASE_URL=${{ secrets.TURSO_DATABASE_URL }}"
                 echo "TURSO_AUTH_TOKEN=${{ secrets.TURSO_AUTH_TOKEN }}"
@@ -173,13 +195,13 @@ jobs:
                 echo "ALLOWED_ORIGINS=${{ secrets.ALLOWED_ORIGINS || '*' }}"
                 # 分佣 shareCode：前端拼套餐直达码用，没配就走代码里的兜底值
                 echo "JTC_SHARE_CODE=${{ secrets.JTC_SHARE_CODE }}"
-              } | sudo tee "$SITE_DIR/.env" >/dev/null
-              sudo chmod 600 "$SITE_DIR/.env"
+              } | sudo tee "$ENV_FILE" >/dev/null
             fi
+            sudo chmod 600 "$ENV_FILE"
 
             echo "=== 环境自检：容器里的 DB 配置能不能通 ==="
             # 只打 URL、token 长度和哈希前缀，不泄露 token 本身；连不上直接失败，不浪费一次预检
-            if ! sudo docker run --rm --env-file "$SITE_DIR/.env" "$IMAGE" node -e '
+            if ! sudo docker run --rm --env-file "$ENV_FILE" "$IMAGE" node -e '
               const c = require("crypto");
               const url = process.env.TURSO_DATABASE_URL || "";
               const token = process.env.TURSO_AUTH_TOKEN || "";
@@ -200,7 +222,7 @@ jobs:
                   process.exit(1);
                 });
             '; then
-              echo "❌ 数据库自检未通过：核对 TURSO_* secrets（或手动修 $SITE_DIR/.env 后带 refresh_env 重跑）"
+              echo "❌ 数据库自检未通过：核对 TURSO_* secrets（或手动修 $ENV_FILE 后带 refresh_env 重跑）"
               exit 1
             fi
 
@@ -209,8 +231,8 @@ jobs:
                 --name "$CONTAINER" \
                 --restart unless-stopped \
                 -p "$APP_PORT:3000" \
-                -v "$SITE_DIR/uploads:/app/public/uploads" \
-                --env-file "$SITE_DIR/.env" \
+                -v "$UPLOADS_DIR:/app/public/uploads" \
+                --env-file "$ENV_FILE" \
                 --memory 768m \
                 --cpus "1.0" \
                 --log-opt max-size=10m \
@@ -290,4 +312,10 @@ jobs:
             else
               echo "⚠️ 宿主机 $APP_PORT 返回 $HOST_CODE：映射或防火墙/安全组需人工确认"
               sudo docker port "$CONTAINER" || true
+            fi
+
+            # 旧的 /opt/jietingche 已废弃（.env 与 uploads 都搬到 data/ 了），新容器确实在跑才删
+            if [ "$LEGACY_SITE_DIR" != "$SITE_DIR" ] && sudo test -d "$LEGACY_SITE_DIR"; then
+              echo "=== 清理旧站点目录 $LEGACY_SITE_DIR ==="
+              sudo rm -rf "$LEGACY_SITE_DIR"
             fi

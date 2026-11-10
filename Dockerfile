@@ -28,7 +28,7 @@ COPY --from=builder --chown=nextjs:nodejs /app/public ./public
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 
-# 上传的推广码图片落在 public/uploads，运行时挂卷覆盖
+# 上传文件落在 public/uploads，运行时由站点目录的 data/uploads 挂卷覆盖
 RUN mkdir -p /app/public/uploads && chown -R nextjs:nodejs /app/public/uploads
 
 USER nextjs

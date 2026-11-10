@@ -135,16 +135,17 @@ ADMIN_PASSWORD='换成一个强口令'
 `.github/workflows/deploy.yml`：push main 自动跑「类型检查 + lint + 构建」→ 构建镜像推 GHCR →
 SSH 到服务器拉取换容器。服务器上只要有 Docker，数据全在 Turso，容器本身无状态。
 
-服务器上 `/opt/jietingche`（可用 `DEPLOY_SITE_DIR` 改）：
+服务器上落在 1Panel 站点目录 `/opt/1panel/www/sites/jietingche.shenzjd.com`（可用 `DEPLOY_SITE_DIR` 改），
+所有运行时文件收在 `data/` 下，1Panel 备份站点时会一起带上：
 
-- `.env`：`TURSO_DATABASE_URL` / `TURSO_AUTH_TOKEN` / `ADMIN_PASSWORD` / `ALLOWED_ORIGINS`。
+- `data/.env`：`TURSO_DATABASE_URL` / `TURSO_AUTH_TOKEN` / `ADMIN_PASSWORD` / `ALLOWED_ORIGINS` / `JTC_SHARE_CODE`。
   首次部署若不存在，会用 GitHub secrets 自动生成（chmod 600，`ALLOWED_ORIGINS` 不配默认 `*`），
-  之后以服务器上这份为准。
-- `uploads/`：挂到容器 `/app/public/uploads`，存后台上传的推广码图片，换容器不丢。
+  之后以服务器上这份为准；想把 secret 的改动刷进服务器，手动跑一次 workflow 勾 `refresh_env=true`。
+- `data/uploads/`：挂到容器 `/app/public/uploads`，换容器不丢（码图已改成前端生成，这里是通用上传位）。
 
 仓库 Settings → Secrets 需要配：`DEPLOY_HOST`、`DEPLOY_USER`、`DEPLOY_PASSWORD`、
 `TURSO_DATABASE_URL`、`TURSO_AUTH_TOKEN`、`ADMIN_PASSWORD`，可选 `DEPLOY_PORT`（默认 22）、
-`DEPLOY_SITE_DIR`（默认 `/opt/jietingche`）、`APP_PORT`（默认 3000）。
+`DEPLOY_SITE_DIR`、`APP_PORT`（默认 3000，线上用的是 6715）、`JTC_SHARE_CODE`。
 
 部署顺序是「拉镜像 → 临时容器预检 → 换容器 → 容器内探活」，任一步失败都保留旧容器/
 旧镜像（`jietingche:previous`）可回滚，不会出现停服又拉不起来的情况。
