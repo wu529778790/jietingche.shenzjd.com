@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import FilterSheet, { type FilterValues } from "@/components/FilterSheet";
+import LocationSheet from "@/components/LocationSheet";
 import PackageSheet from "@/components/PackageSheet";
 import {
   SORT_OPTIONS,
@@ -90,6 +91,7 @@ export default function HomePage() {
   const [exhausted, setExhausted] = useState(false);
   const [active, setActive] = useState<{ park: ParkWithPackages; pkg: Package } | null>(null);
   const [filterOpen, setFilterOpen] = useState(false);
+  const [locationOpen, setLocationOpen] = useState(false);
 
   const reqId = useRef(0);
   /** 用户手动选过城市后，定位反查到的城市不要覆盖他的选择 */
@@ -288,15 +290,11 @@ export default function HomePage() {
   }, [locate]);
 
   /** 筛选面板里控制的那几项，用来回填面板和算「筛选」上的角标 */
-  const filterValues: FilterValues = { district, industry, type, slot, maxPrice };
+  const filterValues: FilterValues = { industry, type, slot, maxPrice };
   const filterCount =
-    (district ? 1 : 0) +
-    (industry ? 1 : 0) +
-    (type ? 1 : 0) +
-    (slot ? 1 : 0) +
-    (maxPrice > 0 ? 1 : 0);
+    (industry ? 1 : 0) + (type ? 1 : 0) + (slot ? 1 : 0) + (maxPrice > 0 ? 1 : 0);
 
-  /** 切城市要顺手清掉区域，不然会筛出空结果；手动选过就不再被定位结果覆盖 */
+  /** 「位置」弹层里选城市：切城市要顺手清掉区域，不然会筛出空结果 */
   function chooseCity(name: string) {
     cityTouched.current = true;
     setCity(name);
@@ -305,7 +303,6 @@ export default function HomePage() {
 
   /** 面板里点了「确定」才写回这些条件 */
   function applyFilters(next: FilterValues) {
-    setDistrict(next.district);
     setIndustry(next.industry);
     setType(next.type);
     setSlot(next.slot);
@@ -353,37 +350,16 @@ export default function HomePage() {
         ) : null}
       </section>
 
-      {/* 官方式筛选条：城市 / 筛选入口 / 排序都挤在一行，条件进面板里选 */}
+      {/* 官方式筛选条：位置 / 筛选入口 / 排序都挤在一行，条件进面板里选 */}
       <section className="card no-scrollbar sticky top-0 z-20 flex items-center gap-1 overflow-x-auto px-2 py-2 shadow-[0_1px_8px_rgba(16,20,28,0.06)]">
-        <div className="relative flex shrink-0 items-center">
-          <select
-            aria-label="选择城市"
-            value={city}
-            onChange={(e) => chooseCity(e.target.value)}
-            className="filter-pill pr-6"
-          >
-            <option value="">全国</option>
-            {facets.cities.map((item) => (
-              <option key={item.name} value={item.name}>
-                {item.name.replace(/市$/, "")}
-              </option>
-            ))}
-          </select>
-          <svg
-            viewBox="0 0 12 12"
-            aria-hidden="true"
-            className="pointer-events-none absolute right-1.5 h-2.5 w-2.5 text-muted"
-          >
-            <path
-              d="M2.5 4.5 6 8l3.5-3.5"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.5"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
-          </svg>
-        </div>
+        <button
+          type="button"
+          onClick={() => setLocationOpen(true)}
+          className={`filter-pill shrink-0 ${city || district ? "is-active" : ""}`}
+        >
+          {city ? city.replace(/市$/, "") : "位置"}
+          {district ? ` · ${district}` : ""}
+        </button>
 
         <button
           type="button"
@@ -410,7 +386,7 @@ export default function HomePage() {
           </button>
         ))}
 
-        {city || keyword || filterCount > 0 ? (
+        {city || district || keyword || filterCount > 0 ? (
           <button type="button" className="filter-pill shrink-0" onClick={resetAll}>
             清空
           </button>
@@ -525,13 +501,21 @@ export default function HomePage() {
         <div className="py-3 text-center text-[11px] text-muted">没有更多了</div>
       ) : null}
 
+      {locationOpen ? (
+        <LocationSheet
+          city={city}
+          cities={facets.cities.map((item) => item.name)}
+          district={district}
+          districts={facets.districts.map((item) => item.name)}
+          onPickCity={chooseCity}
+          onPickDistrict={setDistrict}
+          onClose={() => setLocationOpen(false)}
+        />
+      ) : null}
+
       {filterOpen ? (
         <FilterSheet
           value={filterValues}
-          city={city}
-          cities={facets.cities.map((item) => item.name)}
-          districts={facets.districts.map((item) => item.name)}
-          onPickCity={chooseCity}
           onClose={() => setFilterOpen(false)}
           onApply={applyFilters}
         />
