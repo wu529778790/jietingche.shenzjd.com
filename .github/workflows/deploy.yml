@@ -258,7 +258,7 @@ jobs:
 
             echo "=== 预检：新镜像先起临时容器（不占对外端口） ==="
             sudo docker rm -f "$PRECHECK" >/dev/null 2>&1 || true
-            sudo docker run -d --name "$PRECHECK" --env-file "$SITE_DIR/.env" "$IMAGE" >/dev/null
+            sudo docker run -d --name "$PRECHECK" --env-file "$ENV_FILE" "$IMAGE" >/dev/null
             if ! wait_healthy "$PRECHECK"; then
               echo "❌ 预检失败，旧容器未动。最近日志："
               sudo docker logs --tail 60 "$PRECHECK" || true
