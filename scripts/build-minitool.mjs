@@ -38,6 +38,8 @@ const argValue = (name) => {
   return i >= 0 ? args[i + 1] : undefined;
 };
 const inlineCity = argValue("--city") ?? "深圳市";
+/** 用 export-snapshot 产出的 JSON 当数据源（CI / 换机器时用，不必有本地 jtc.db） */
+const snapshotArg = argValue("--snapshot") ?? process.env.JTC_SNAPSHOT;
 // 全局兜底码：2026-11-10 官方首页海报解码（search-stall 会话）
 const shareCode = argValue("--share-code") ?? process.env.JTC_SHARE_CODE
   ?? "USC261110002056207ZEqLdE";
@@ -106,27 +108,45 @@ function safeJson(text) {
   try { return JSON.parse(text); } catch { return {}; }
 }
 
-/* ------------------------------ 1. 读库 → 全城市数据 ------------------------------ */
+/* ------------------------------ 1. 读数据 → 全城市数据 ------------------------------ */
 
-if (!existsSync(SRC_DB)) {
-  console.error(`找不到源库：${SRC_DB}`);
-  console.error("先跑数据抓取：node --no-warnings scripts/crawl-jtc.mjs");
-  process.exit(1);
-}
-
-const db = new DatabaseSync(SRC_DB, { readOnly: true });
-const rows = db.prepare(`
-  SELECT park_code, park_name, package_name, package_id, package_type,
-         address, district, city, lng, lat, current_price, origin_price,
-         package_rules, raw
-  FROM packages
-  WHERE status = 'ENABLE'
-`).all();
-
-// 城市中心坐标（cities 表，定位自动切城用）
+let rows;
 const cityCenters = new Map();
-for (const c of db.prepare("SELECT city_name, longitude, latitude FROM cities").all()) {
-  if (c.longitude && c.latitude) cityCenters.set(c.city_name, [c.longitude, c.latitude]);
+
+if (snapshotArg) {
+  const file = resolve(ROOT, snapshotArg);
+  if (!existsSync(file)) {
+    console.error(`找不到快照：${file}`);
+    console.error("先跑 node scripts/export-snapshot.mjs");
+    process.exit(1);
+  }
+  const snapshot = JSON.parse(readFileSync(file, "utf8"));
+  rows = snapshot.rows ?? [];
+  for (const c of snapshot.cities ?? []) {
+    cityCenters.set(c.city_name, [c.longitude, c.latitude]);
+  }
+  console.log(`数据源：快照 ${file}（${rows.length} 条套餐 / ${cityCenters.size} 个城市）`);
+} else {
+  if (!existsSync(SRC_DB)) {
+    console.error(`找不到源库：${SRC_DB}`);
+    console.error("先跑数据抓取：node --no-warnings scripts/crawl-jtc.mjs");
+    console.error("或者用快照：node scripts/build-minitool.mjs --snapshot data/jtc-snapshot.json");
+    process.exit(1);
+  }
+  const db = new DatabaseSync(SRC_DB, { readOnly: true });
+  rows = db.prepare(`
+    SELECT park_code, park_name, package_name, package_id, package_type,
+           address, district, city, lng, lat, current_price, origin_price,
+           package_rules, raw
+    FROM packages
+    WHERE status = 'ENABLE'
+  `).all();
+  // 城市中心坐标（cities 表，定位自动切城用）
+  for (const c of db.prepare("SELECT city_name, longitude, latitude FROM cities").all()) {
+    if (c.longitude && c.latitude) cityCenters.set(c.city_name, [c.longitude, c.latitude]);
+  }
+  db.close();
+  console.log(`数据源：本地库 ${SRC_DB}（${rows.length} 条套餐）`);
 }
 
 const parks = new Map();
@@ -153,7 +173,7 @@ for (const r of rows) {
     id: r.package_id,
     n: stripPkgName(stripTags(r.package_name), r.park_name),
     t: String(r.package_type),
-    v: String(raw.packageInterval ?? 0),
+    v: String(r.interval ?? raw.packageInterval ?? 0),
     pr: r.current_price || 0,
     po: r.origin_price || 0,
     ru: ruleText(r.package_rules),
@@ -303,7 +323,9 @@ if (existsSync(writeManifest)) {
   execFileSync("node", [writeManifest, DIST, "false"]);
   console.log("mini_tool.json：false（无高消耗能力）");
 } else {
-  console.warn(`警告：未找到官方 write_manifest.mjs（${BUILDER}），跳过清单生成`);
+  // 官方脚本不在（CI / 换机器）时落一份等价清单：本工具无 Worker/WASM/离屏/引擎
+  writeFileSync(resolve(DIST, "mini_tool.json"), JSON.stringify({ is_high_consumption_scene: false }));
+  console.warn(`未找到官方 write_manifest.mjs（${BUILDER}），已写内置等价清单`);
 }
 
 /* ------------------------------ 6. 官方审计 → zip → 审计 zip ------------------------------ */
@@ -317,10 +339,16 @@ if (existsSync(audit)) {
 }
 
 const zipPath = resolve(DIST, "zhao-tingche-minitool.zip");
-execFileSync("powershell", [
-  "-NoProfile", "-Command",
-  `Compress-Archive -Path '${DIST}\\index.html','${DIST}\\app.js','${DIST}\\style.css','${DIST}\\data.js','${DIST}\\qr-data.js','${DIST}\\qr-encoder.js','${DIST}\\mini_tool.json','${DIST}\\assets' -DestinationPath '${zipPath}' -Force`,
-]);
+const zipEntries = ["index.html", "app.js", "style.css", "data.js", "qr-data.js", "qr-encoder.js", "mini_tool.json", "assets"];
+if (process.platform === "win32") {
+  execFileSync("powershell", [
+    "-NoProfile", "-Command",
+    `Compress-Archive -Path ${zipEntries.map((name) => `'${DIST}\\${name}'`).join(",")} -DestinationPath '${zipPath}' -Force`,
+  ]);
+} else {
+  // CI（Linux）上用系统 zip，参数与 Windows 版列同样的条目
+  execFileSync("zip", ["-qr", zipPath, ...zipEntries], { cwd: DIST });
+}
 
 if (existsSync(audit)) {
   console.log("--- 官方审计：最终 zip ---");

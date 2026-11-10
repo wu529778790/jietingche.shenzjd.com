@@ -65,6 +65,24 @@ node --no-warnings scripts/import-jtc.mjs --city 深圳市   # 只导一个城�
 按车场名推断业态（商场/写字楼/医院/景区/社区/交通枢纽）、官方 `<居住推荐>` 等标签转成适用人群。
 已上传的专属码不会被重导入覆盖。
 
+## 小红书小工具产线
+
+小工具是离线 H5 包，数据必须构建期就烙进去，所以走「快照 → 打包」：
+
+```bash
+npm run snapshot                    # data/jtc.db → data/jtc-snapshot.json
+npm run minitool -- --snapshot data/jtc-snapshot.json   # → minitool/dist/*.zip
+npm run minitool -- --snapshot data/jtc-snapshot.json --city 广州市
+```
+
+- 快照只留打包要用的字段（`raw` 压缩成 `packageInterval` 一个数），59MB 原始池 → 10.6MB JSON，
+  可以放到任意能直链下载的地方；
+- 不带 `--snapshot` 时仍读本地 `data/jtc.db`，老流程不变；
+- 官方 skill 目录（`~/.agents/skills/minitool-zip-builder`）不在时自动写等价 `mini_tool.json`，
+  CI/Linux 用系统 `zip`，Windows 继续用 `Compress-Archive`；
+- `.github/workflows/minitool.yml` 手动触发：填快照 URL → 出包 → 存 artifact（30 天）。
+  **送审仍在本地**（`redapp preview` 扫码 → `redapp submit`），要本机登录并人工看预览。
+
 ## 页面
 
 | 路径 | 归属 | 用途 |
@@ -80,9 +98,14 @@ node --no-warnings scripts/import-jtc.mjs --city 深圳市   # 只导一个城�
 
 ## 后台鉴权
 
-`src/proxy.ts`（Next 16 的 proxy 约定，即原 middleware）拦住 `/admin/*` 和 `/api/*`。公开白名单只有三项：
-`GET /api/search`、`GET /api/facets`、`GET /api/config`（首页要读兜底码），
+`src/proxy.ts`（Next 16 的 proxy 约定，即原 middleware）拦住 `/admin/*` 和 `/api/*`。公开白名单：
+`GET /api/search`、`GET /api/facets`、`GET /api/locate`、`GET /api/config`（首页要读兜底码），
 加上登录/登出接口和 `/admin/login` 本身。其余读写接口、车场库/台账/对账全部要登录态。
+`/api/v1/*` 是同一批接口的对外别名（`next.config` 里 rewrite 到 `/api/*`），proxy 判定时按别名归一。
+
+公开接口统一走 `src/lib/api.ts`：CORS 白名单（`ALLOWED_ORIGINS`，逗号分隔，`*` 表示全放开）、
+按 IP 每分钟限流（搜索 240 / 其它 120，进程内计数）、统一 `{ ok, data }` 结构，
+搜索和分面还带 `Cache-Control`。
 
 ```bash
 # 生产必须配置，容器启动时注入即可（proxy 固定跑 Node 运行时，不需要构建期写死）
@@ -103,8 +126,9 @@ SSH 到服务器拉取换容器。服务器上只要有 Docker，数据全在 Tu
 
 服务器上 `/opt/jietingche`（可用 `DEPLOY_SITE_DIR` 改）：
 
-- `.env`：`TURSO_DATABASE_URL` / `TURSO_AUTH_TOKEN` / `ADMIN_PASSWORD`。首次部署若不存在，
-  会用 GitHub secrets 自动生成（chmod 600），之后以服务器上这份为准。
+- `.env`：`TURSO_DATABASE_URL` / `TURSO_AUTH_TOKEN` / `ADMIN_PASSWORD` / `ALLOWED_ORIGINS`。
+  首次部署若不存在，会用 GitHub secrets 自动生成（chmod 600，`ALLOWED_ORIGINS` 不配默认 `*`），
+  之后以服务器上这份为准。
 - `uploads/`：挂到容器 `/app/public/uploads`，存后台上传的推广码图片，换容器不丢。
 
 仓库 Settings → Secrets 需要配：`DEPLOY_HOST`、`DEPLOY_USER`、`DEPLOY_PASSWORD`、

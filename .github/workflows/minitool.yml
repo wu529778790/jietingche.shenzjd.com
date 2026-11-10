@@ -1,0 +1,57 @@
+name: Minitool Build
+
+# 小工具产线：快照 → 打包 zip（产物留档）。
+# 送审不在这里做——redapp 要本机扫码登录、还要人看预览，交给人工。
+#
+# 快照从哪来：本地有原始池的时候跑 `npm run snapshot`，
+# 把 data/jtc-snapshot.json 传到任意可直链下载的地方（服务器 /snapshots/ 或对象存储），
+# 地址放进 secret MINITOOL_SNAPSHOT_URL，或手动触发时填 snapshot_url。
+
+on:
+  workflow_dispatch:
+    inputs:
+      snapshot_url:
+        description: 快照 JSON 地址（留空用 secret MINITOOL_SNAPSHOT_URL）
+        required: false
+      city:
+        description: 打进包里的主城市
+        required: false
+        default: 深圳市
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: 构建小工具包
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+
+      - run: npm ci
+
+      - name: 下载数据快照
+        env:
+          SNAPSHOT_URL: ${{ inputs.snapshot_url || secrets.MINITOOL_SNAPSHOT_URL }}
+        run: |
+          if [ -z "$SNAPSHOT_URL" ]; then
+            echo "::error::没有快照地址：填 snapshot_url 或配 secret MINITOOL_SNAPSHOT_URL"
+            exit 1
+          fi
+          mkdir -p data
+          curl -fsSL "$SNAPSHOT_URL" -o data/jtc-snapshot.json
+          node -e "const s=require('./data/jtc-snapshot.json');console.log('快照', s.rows.length, '条套餐 /', s.cities.length, '个城市 /', s.generatedAt)"
+
+      - name: 打包
+        run: npm run minitool -- --snapshot data/jtc-snapshot.json --city "${{ inputs.city || '深圳市' }}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: minitool-zip
+          path: minitool/dist/*.zip
+          retention-days: 30

@@ -164,6 +164,7 @@ jobs:
                 echo "TURSO_DATABASE_URL=${{ secrets.TURSO_DATABASE_URL }}"
                 echo "TURSO_AUTH_TOKEN=${{ secrets.TURSO_AUTH_TOKEN }}"
                 echo "ADMIN_PASSWORD=${{ secrets.ADMIN_PASSWORD }}"
+                echo "ALLOWED_ORIGINS=${{ secrets.ALLOWED_ORIGINS || '*' }}"
               } | sudo tee "$SITE_DIR/.env" >/dev/null
               sudo chmod 600 "$SITE_DIR/.env"
             fi
