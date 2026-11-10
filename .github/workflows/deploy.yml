@@ -171,6 +171,16 @@ jobs:
             sudo mkdir -p "$UPLOADS_DIR"
             # 容器里以 nextjs(1001) 运行，上传目录得让它可写
             sudo chown -R 1001:1001 "$UPLOADS_DIR"
+            # 业务库是宿主机上的 SQLite 文件，挂到容器 /app/data。
+            # 目录本身要可写：SQLite 要在同目录落 -wal/-journal。
+            sudo chown 1001:1001 "$DATA_DIR"
+            if [ ! -s "$DATA_DIR/app.db" ]; then
+              echo "❌ 缺少 $DATA_DIR/app.db（本地 SQLite 业务库），中止部署避免上线空白站"
+              echo "   在本地跑：npm run db:pull && scp data/app.db <user>@<host>:$DATA_DIR/app.db"
+              exit 1
+            fi
+            sudo chown 1001:1001 "$DATA_DIR/app.db"
+            echo "业务库 $(du -h "$DATA_DIR/app.db" | cut -f1)"
 
             # 老版本把 .env / uploads 放在 /opt/jietingche，首次迁过来，别把 DB 配置弄丢
             if [ "$LEGACY_SITE_DIR" != "$SITE_DIR" ] && sudo test -d "$LEGACY_SITE_DIR"; then
@@ -199,30 +209,27 @@ jobs:
             fi
             sudo chmod 600 "$ENV_FILE"
 
-            echo "=== 环境自检：容器里的 DB 配置能不能通 ==="
-            # 只打 URL、token 长度和哈希前缀，不泄露 token 本身；连不上直接失败，不浪费一次预检
-            if ! sudo docker run --rm --env-file "$ENV_FILE" "$IMAGE" node -e '
-              const c = require("crypto");
-              const url = process.env.TURSO_DATABASE_URL || "";
-              const token = process.env.TURSO_AUTH_TOKEN || "";
-              console.log("URL:", JSON.stringify(url), "len", url.length);
-              console.log("TOKEN len", token.length, "sha", c.createHash("sha256").update(token).digest("hex").slice(0, 12));
-              const endpoint = url.replace(/^libsql:\/\//, "https://") + "/v2/pipeline";
-              fetch(endpoint, {
-                method: "POST",
-                headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" },
-                body: JSON.stringify({ requests: [{ type: "execute", stmt: { sql: "select 1" } }, { type: "close" }] }),
-              })
-                .then(async (r) => {
-                  console.log("PIPELINE", r.status, (await r.text()).slice(0, 160));
-                  if (r.status !== 200) process.exit(1);
+            echo "=== 环境自检：本地业务库能不能读 ==="
+            # 换成本地 SQLite 后，DB 就在挂载卷里。这里先验一遍「读得到 + 有数据」，
+            # 免得把空库/无权限的目录带上线（那会是全站空白，比 500 更难查）。
+            if ! sudo docker run --rm -v "$DATA_DIR:/app/data" "$IMAGE" node -e '
+              const { createClient } = require("@libsql/client");
+              const c = createClient({ url: "file:/app/data/app.db" });
+              c.execute("select count(*) n from car_parks")
+                .then((r) => {
+                  const n = Number(r.rows[0].n);
+                  console.log("car_parks", n);
+                  if (!n) {
+                    console.log("空库：先把 data/app.db 传上来");
+                    process.exit(1);
+                  }
                 })
                 .catch((e) => {
-                  console.log("PIPELINE ERROR", e.message);
+                  console.log("DB ERROR", e.message);
                   process.exit(1);
                 });
             '; then
-              echo "❌ 数据库自检未通过：核对 TURSO_* secrets（或手动修 $ENV_FILE 后带 refresh_env 重跑）"
+              echo "❌ 本地库自检未通过：检查 $DATA_DIR/app.db 是否存在、内容是否为空、权限是否给了 1001"
               exit 1
             fi
 
@@ -232,6 +239,7 @@ jobs:
                 --restart unless-stopped \
                 -p "$APP_PORT:3000" \
                 -v "$UPLOADS_DIR:/app/public/uploads" \
+                -v "$DATA_DIR:/app/data" \
                 --env-file "$ENV_FILE" \
                 --memory 768m \
                 --cpus "1.0" \
@@ -258,14 +266,21 @@ jobs:
 
             echo "=== 预检：新镜像先起临时容器（不占对外端口） ==="
             sudo docker rm -f "$PRECHECK" >/dev/null 2>&1 || true
-            sudo docker run -d --name "$PRECHECK" --env-file "$ENV_FILE" "$IMAGE" >/dev/null
+            # 用业务库的副本做预检：既验证真实数据能读，又不让临时容器和线上容器
+            # 同时打开同一个 SQLite 文件（DDL/写锁会互相干扰）。
+            PRECHECK_DIR=$(mktemp -d)
+            sudo cp "$DATA_DIR/app.db" "$PRECHECK_DIR/app.db"
+            sudo chown -R 1001:1001 "$PRECHECK_DIR"
+            sudo docker run -d --name "$PRECHECK" -v "$PRECHECK_DIR:/app/data" --env-file "$ENV_FILE" "$IMAGE" >/dev/null
             if ! wait_healthy "$PRECHECK"; then
               echo "❌ 预检失败，旧容器未动。最近日志："
               sudo docker logs --tail 60 "$PRECHECK" || true
               sudo docker rm -f "$PRECHECK" >/dev/null 2>&1 || true
+              sudo rm -rf "$PRECHECK_DIR"
               exit 1
             fi
             sudo docker rm -f "$PRECHECK" >/dev/null
+            sudo rm -rf "$PRECHECK_DIR"
             echo "预检通过"
 
             echo "=== 记录回滚镜像 ==="

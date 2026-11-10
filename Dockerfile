@@ -1,5 +1,5 @@
 # 自托管部署：多阶段构建，最终镜像只留 standalone 产物
-# 数据库在 Turso（远程），容器本身无状态；只有 public/uploads 需要挂卷
+# 业务库是宿主机上的 SQLite 文件（data/app.db），连同 public/uploads 一起挂卷
 
 FROM node:24-alpine AS deps
 WORKDIR /app
@@ -29,7 +29,8 @@ COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 
 # 上传文件落在 public/uploads，运行时由站点目录的 data/uploads 挂卷覆盖
-RUN mkdir -p /app/public/uploads && chown -R nextjs:nodejs /app/public/uploads
+# /app/data 放 SQLite 业务库，运行时由站点目录的 data 挂卷覆盖
+RUN mkdir -p /app/public/uploads /app/data && chown -R nextjs:nodejs /app/public/uploads /app/data
 
 USER nextjs
 EXPOSE 3000
