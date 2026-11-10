@@ -335,6 +335,30 @@ export interface SearchResult {
 }
 
 /**
+ * 定位后自动认城市：取最近的 20 个车场，谁的城市场次最多就认谁。
+ * 数据库里没有城市边界数据，用「最近车场的城市」比纯最近一个更抗边界误差（比如站在深莞交界）。
+ */
+export async function nearestCity(lat: number, lng: number): Promise<string> {
+  await ensureSchema();
+  const cosLat = Math.cos((lat * Math.PI) / 180) ** 2 || 1;
+  const res = await db.execute({
+    sql: `SELECT city FROM (
+            SELECT c.city AS city,
+                   ((c.lat - ?) * (c.lat - ?)) + ((c.lng - ?) * (c.lng - ?)) * ? AS d
+            FROM car_parks c
+            WHERE c.lat IS NOT NULL AND c.lng IS NOT NULL AND c.city <> ''
+            ORDER BY d ASC
+            LIMIT 20
+          )
+          GROUP BY city
+          ORDER BY COUNT(*) DESC, MIN(d) ASC
+          LIMIT 1`,
+    args: [lat, lat, lng, lng, cosLat],
+  });
+  return str(res.rows[0]?.city);
+}
+
+/**
  * 面向访客的搜索：按官方那套筛（城市/区/业态/套餐类型/时段/价格）+ 定位距离排序。
  * 先按条件筛出车场 id 分页，再补车场和套餐，避免把几万行拉进内存。
  */
@@ -385,9 +409,10 @@ export async function searchPublic(input: SearchInput): Promise<SearchResult> {
   const hasGeo = Number.isFinite(lat) && Number.isFinite(lng) && (lat !== 0 || lng !== 0);
 
   const orderArgs: (string | number)[] = [];
-  // 没选城市、没定位时，推荐位优先给北上广深/省会
+  // 没选城市、也不是按距离排时，推荐位优先给北上广深/省会
+  // （前端为了展示「离我多远」会一直带经纬度，所以这里不能再看 hasGeo）
   const focusOrder =
-    !input.city && !hasGeo
+    !input.city && !(input.sort === "distance" && hasGeo)
       ? `CASE WHEN c.city IN (${placeholders(FOCUS_CITIES.length)}) THEN 0 ELSE 1 END ASC`
       : "";
   let orderSql = "MAX(k.commission) DESC, MIN(k.price) ASC";
