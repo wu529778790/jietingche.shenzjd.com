@@ -6,6 +6,7 @@ import PackageSheet from "@/components/PackageSheet";
 import {
   SORT_OPTIONS,
   formatDistance,
+  shortPackageName,
   yuan,
   type Package,
   type ParkWithPackages,
@@ -440,7 +441,7 @@ export default function HomePage() {
                 className="rounded-lg border border-border px-2.5 py-1.5 text-left transition-colors hover:border-brand/50 hover:bg-brand/[0.03]"
               >
                 <div className="text-[11px] text-muted">
-                  {pkg.typeLabel || pkg.name}
+                  {pkg.typeLabel || shortPackageName(park.name, pkg.name)}
                   {pkg.period ? <span className="ml-1">{pkg.period}</span> : null}
                 </div>
                 <div className="mt-0.5 flex items-baseline gap-1">

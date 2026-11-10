@@ -84,8 +84,13 @@ function buildRule(raw) {
   const labelOf = (t) => TIME_TYPE_LABEL[t] || t;
   const periods = rules
     .map((r) => {
-      const span = r.timePeriod || `${r.beginTime || ''}-${r.endTime || ''}`.replace(/^-|-$/g, '');
-      return `${labelOf(r.timeType)} ${span}`.replace(/\s+/g, ' ').trim();
+      const label = labelOf(r.timeType);
+      const span = (r.timePeriod || `${r.beginTime || ''}-${r.endTime || ''}`)
+        .replace(/^-|-$/g, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+      // timePeriod 本身可能已经带了时段名（「每天 00:00-23:59」），别再叠一层
+      return span.startsWith(label) ? span : `${label} ${span}`.trim();
     })
     .filter(Boolean);
   const uniq = [...new Set(periods)];

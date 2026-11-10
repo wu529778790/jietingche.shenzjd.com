@@ -2,7 +2,14 @@
 
 import { useMemo } from "react";
 import { packageQrDataUrl } from "@/lib/qr";
-import { formatDistance, yuan, type Package, type ParkWithPackages } from "@/lib/types";
+import {
+  formatDistance,
+  shortPackageName,
+  tidyRuleSummary,
+  yuan,
+  type Package,
+  type ParkWithPackages,
+} from "@/lib/types";
 
 interface Props {
   park: ParkWithPackages;
@@ -25,6 +32,9 @@ export default function PackageSheet({ park, pkg, onClose, shareCode = "" }: Pro
     [park.parkCode, pkg.sourcePackageId, shareCode],
   );
 
+  /** 官方套餐名带车场前缀，标题已经写了车场，这里只留套餐本身 */
+  const pkgLabel = useMemo(() => shortPackageName(park.name, pkg.name), [park.name, pkg.name]);
+
   const facts = [
     pkg.typeLabel,
     pkg.period,
@@ -44,11 +54,7 @@ export default function PackageSheet({ park, pkg, onClose, shareCode = "" }: Pro
         <div className="mb-3 flex items-start justify-between gap-2">
           <div className="min-w-0">
             <div className="truncate text-base font-semibold">{park.name}</div>
-            <div className="mt-0.5 text-xs text-muted">
-              {pkg.name}
-              {pkg.period ? ` · ${pkg.period}` : ""}
-              {pkg.price > 0 ? ` · ¥${yuan(pkg.price)}` : ""}
-            </div>
+            <div className="mt-0.5 text-xs text-muted">{pkgLabel}</div>
             {park.distance ? (
               <div className="mt-0.5 text-[11px] text-brand">
                 距你 {formatDistance(park.distance)}
@@ -60,29 +66,10 @@ export default function PackageSheet({ park, pkg, onClose, shareCode = "" }: Pro
           </button>
         </div>
 
-        {qr ? (
-          <>
-            <div className="mb-2 rounded-xl border border-border bg-white p-3">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={qr}
-                alt={`${park.name}套餐二维码`}
-                className="mx-auto block max-h-72 w-auto"
-              />
-            </div>
-            <div className="mb-3 text-center text-xs text-muted">
-              长按识别二维码 → 选「{pkg.name}」下单，办完当天就能用
-            </div>
-          </>
-        ) : (
-          <div className="mb-3 rounded-xl border border-dashed border-border p-6 text-center text-sm text-muted">
-            二维码生成失败，刷新页面再试，或直接在小程序里搜「{park.name}」
-          </div>
-        )}
-
-        <div className="mb-3 flex flex-wrap items-center gap-2 text-xs">
+        {/* 先给价格和规格，再给码：用户先判断值不值，再决定扫不扫 */}
+        <div className="mb-3 flex flex-wrap items-baseline gap-2 text-xs">
           {pkg.price > 0 ? (
-            <span className="text-lg font-semibold text-brand">¥{yuan(pkg.price)}</span>
+            <span className="text-xl font-semibold text-brand">¥{yuan(pkg.price)}</span>
           ) : null}
           {pkg.originPrice > pkg.price ? (
             <span className="text-muted line-through">¥{yuan(pkg.originPrice)}</span>
@@ -94,9 +81,29 @@ export default function PackageSheet({ park, pkg, onClose, shareCode = "" }: Pro
           ))}
         </div>
 
+        {qr ? (
+          <>
+            <div className="mb-2 rounded-xl border border-border bg-white p-2">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={qr}
+                alt={`${park.name}套餐二维码`}
+                className="mx-auto block max-h-52 w-auto"
+              />
+            </div>
+            <div className="mb-3 text-center text-xs text-muted">
+              长按识别二维码 → 选「{pkgLabel}」下单，办完当天就能用
+            </div>
+          </>
+        ) : (
+          <div className="mb-3 rounded-xl border border-dashed border-border p-6 text-center text-sm text-muted">
+            二维码生成失败，刷新页面再试，或直接在小程序里搜「{park.name}」
+          </div>
+        )}
+
         {pkg.ruleSummary ? (
           <div className="mb-3 rounded-lg bg-black/[0.03] p-2 text-xs leading-relaxed text-muted">
-            {pkg.ruleSummary}
+            {tidyRuleSummary(pkg.ruleSummary)}
           </div>
         ) : null}
 

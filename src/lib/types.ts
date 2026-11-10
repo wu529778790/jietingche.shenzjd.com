@@ -120,6 +120,33 @@ export function yuan(cent: number): string {
   return (cent / 100).toFixed(2).replace(/\.00$/, "");
 }
 
+/**
+ * 官方套餐名自带车场前缀，如「洪大服装世界城（<畅停无忧>全天套餐_1月）」，
+ * 卡片里已经显示车场名了，这里把前缀裁掉只留套餐本身。
+ */
+export function shortPackageName(parkName: string, packageName: string): string {
+  if (!parkName || !packageName || !packageName.startsWith(parkName)) return packageName;
+  const rest = packageName.slice(parkName.length).trim();
+  const wrapped = rest.match(/^[（(](.+)[）)]$/);
+  if (wrapped) return wrapped[1].trim();
+  return rest.replace(/^[·\-—、,，\s]+/, "").trim() || packageName;
+}
+
+/** 规则摘要里会叠出「每天 每天 00:00-23:59」，展示时把重复前缀压掉 */
+export function tidyRuleSummary(summary: string): string {
+  return summary
+    .split("/")
+    .map((part) => {
+      const words = part.trim().split(/\s+/).filter(Boolean);
+      if (words.length < 3) return words.join(" ");
+      let i = 1;
+      while (i < words.length && words[i] === words[0]) i += 1;
+      return [words[0], ...words.slice(i)].join(" ");
+    })
+    .filter(Boolean)
+    .join(" / ");
+}
+
 /** 两点球面距离，单位米 */
 export function distanceMeters(lat1: number, lng1: number, lat2: number, lng2: number): number {
   const R = 6371000;
