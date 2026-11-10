@@ -15,6 +15,11 @@ npm run build   # 生产构建
 数据库：配了 `TURSO_DATABASE_URL`（+ `TURSO_AUTH_TOKEN`）走远程 libsql，
 否则落到本地 `data/app.db`（首次访问自动建表）。
 
+**数据库只在本地，不入库**：`data/app.db` 是业务库，`data/jtc.db` 是官方选品池原始库
+（`enrich-jtc` / `import-jtc` / `build-minitool` 都依赖它）。换一台电脑或部署到服务器时，
+这两个文件要自己拷过去，或在新机器上按下面的流程重跑爬虫；从 git 拉代码**不会**带数据库。
+WAL/SHM、爬虫日志、`.DS_Store`、`public/uploads/` 里的二维码图片同样不入库，也要单独带走。
+
 ## 数据：爬取 → 清洗导入
 
 ```bash

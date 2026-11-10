@@ -40,15 +40,11 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
-# 本地数据库与上传的专属码图片（含个人分销数据，不入库）
+# 数据库只在本地，不入库（含个人分销数据）：WAL/SHM、爬虫日志、.DS_Store 一并忽略
 /data/
 /public/uploads/
 
-# 爬虫数据
-data/*.db
-data/*.db-wal
-data/*.db-shm
-data/*.log
+# 小程序解包产物与一次性探活脚本
 /reference/wxapkg-jtc/
 /reference/probe*.sh
 
