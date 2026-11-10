@@ -4,6 +4,7 @@ import type { Metadata } from "next";
 import { cache } from "react";
 import Breadcrumb from "@/components/seo/Breadcrumb";
 import AreaGrid from "@/components/seo/AreaGrid";
+import QrActions from "@/components/QrActions";
 import {
   getParkByCode,
   listNearbyParks,
@@ -252,10 +253,9 @@ export default async function ParkPage({ params }: PageProps) {
             />
           </div>
 
-          <p className="mt-2 text-xs text-muted">微信「扫一扫」办理；在微信里打开本页可直接长按识别</p>
-          <p className="mt-1 text-[11px] leading-relaxed text-muted">
-            手机浏览器打开的话：截图保存，再到微信「扫一扫 → 相册」里选这张图。
-          </p>
+          <div className="mt-2">
+            <QrActions qr={qr} filename={`${park.name}-停车月卡二维码`} />
+          </div>
 
           <p className="mt-3 text-[11px] leading-relaxed text-muted">
             本站不代收费用，付款在捷停车官方页面完成；

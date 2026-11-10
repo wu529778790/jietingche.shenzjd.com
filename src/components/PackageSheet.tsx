@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo } from "react";
 import { packageQrDataUrl } from "@/lib/qr";
+import QrActions from "@/components/QrActions";
 import {
   formatDistance,
   monthlyPrice,
@@ -32,12 +33,6 @@ export default function PackageSheet({ park, pkg, onClose, shareCode = "" }: Pro
     () => packageQrDataUrl(park.parkCode, pkg.sourcePackageId, shareCode),
     [park.parkCode, pkg.sourcePackageId, shareCode],
   );
-
-  /** 微信内可以长按识别；别的环境只能扫码或截图扫码，提示词要分开 */
-  const [inWechat, setInWechat] = useState(false);
-  useEffect(() => {
-    setInWechat(/MicroMessenger/i.test(navigator.userAgent));
-  }, []);
 
   /** 官方套餐名带车场前缀，标题已经写了车场，这里只留套餐本身 */
   const pkgLabel = useMemo(() => shortPackageName(park.name, pkg.name), [park.name, pkg.name]);
@@ -107,10 +102,8 @@ export default function PackageSheet({ park, pkg, onClose, shareCode = "" }: Pro
                 className="mx-auto block max-h-56 w-auto"
               />
             </div>
-            <div className="mb-3 text-center text-xs leading-relaxed text-muted">
-              {inWechat
-                ? `长按识别二维码 → 选「${pkgLabel}」下单，办完当天就能用`
-                : "用微信「扫一扫」办理；手机浏览器打开的话，截图后到微信「扫一扫 → 相册」里选这张图"}
+            <div className="mb-3">
+              <QrActions qr={qr} filename={`${park.name}-${pkgLabel}二维码`} compact />
             </div>
           </>
         ) : (
