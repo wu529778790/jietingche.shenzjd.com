@@ -84,6 +84,10 @@ export default function HomePage() {
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
+  /** 自动加载下一页失败时停住，改成手动重试，避免滚到底反复重试 */
+  const [loadMoreError, setLoadMoreError] = useState(false);
+  /** 后端说还有、但下一页实际返回空时标记到底，防止滚到底无限请求 */
+  const [exhausted, setExhausted] = useState(false);
   const [active, setActive] = useState<{ park: ParkWithPackages; pkg: Package } | null>(null);
   const [filterOpen, setFilterOpen] = useState(false);
 
@@ -92,6 +96,10 @@ export default function HomePage() {
   const cityTouched = useRef(false);
   /** 刚拿到定位，下一趟请求用它把旧列表清掉、换成骨架屏，避免列表硬跳 */
   const geoRefresh = useRef(false);
+  /** 首屏/换条件那一趟还在路上，此时别让「滚到底」抢先追加下一页 */
+  const pendingReset = useRef(false);
+  /** 滚到底的哨兵 */
+  const loadMoreRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     fetch("/api/config")
@@ -132,6 +140,9 @@ export default function HomePage() {
         setLoadingMore(true);
       } else {
         setLoading(true);
+        pendingReset.current = true;
+        setLoadMoreError(false);
+        setExhausted(false);
         // 定位刚回来：先把旧列表清掉走骨架屏，不然首屏数据会硬跳一下
         if (geoRefresh.current) {
           geoRefresh.current = false;
@@ -156,16 +167,23 @@ export default function HomePage() {
         params.set("page", String(targetPage));
         params.set("pageSize", String(PAGE_SIZE));
         const res = await fetch(`/api/search?${params.toString()}`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const json = await res.json();
-        if (reqId.current !== id) return;
+        // 被更新的请求取代了，不算失败，也别覆盖列表
+        if (reqId.current !== id) return true;
         const list: ParkWithPackages[] = json?.data ?? [];
+        if (append && list.length === 0) setExhausted(true);
         setParks((prev) => (append ? [...prev, ...list] : list));
         setTotal(json?.total ?? list.length);
         setPage(targetPage);
+        return true;
+      } catch {
+        return false;
       } finally {
         if (reqId.current === id) {
           setLoading(false);
           setLoadingMore(false);
+          if (!append) pendingReset.current = false;
         }
       }
     },
@@ -179,6 +197,27 @@ export default function HomePage() {
     }, 250);
     return () => clearTimeout(timer);
   }, [fetchList]);
+
+  const hasMore = !exhausted && parks.length > 0 && parks.length < total;
+
+  // 滚到底自动续下一页：哨兵进视口就发请求，成功后再往下探一格，直到填满或到底
+  useEffect(() => {
+    if (!hasMore || loadMoreError) return;
+    const el = loadMoreRef.current;
+    if (!el) return;
+    const io = new IntersectionObserver(
+      (entries) => {
+        if (!entries[0].isIntersecting) return;
+        if (loading || loadingMore || pendingReset.current) return;
+        void fetchList(page + 1, true).then((ok) => {
+          if (!ok) setLoadMoreError(true);
+        });
+      },
+      { rootMargin: "240px 0px" },
+    );
+    io.observe(el);
+    return () => io.disconnect();
+  }, [hasMore, loadMoreError, loading, loadingMore, page, fetchList]);
 
   /** 定位成功后再反查城市：默认把结果锁在所在城市，不然「价格最低」会按全国排 */
   const resolveCity = useCallback(async (coords: Coords) => {
@@ -464,14 +503,26 @@ export default function HomePage() {
         ))}
       </div>
 
-      {parks.length > 0 && parks.length < total ? (
-        <button
-          className="btn-ghost w-full"
-          onClick={() => fetchList(page + 1, true)}
-          disabled={loadingMore}
-        >
-          {loadingMore ? "加载中…" : `加载更多（还有 ${total - parks.length} 个）`}
-        </button>
+      {hasMore ? (
+        <div ref={loadMoreRef} className="py-3 text-center text-xs text-muted">
+          {loadMoreError ? (
+            <button
+              className="text-brand"
+              onClick={() => {
+                setLoadMoreError(false);
+                void fetchList(page + 1, true);
+              }}
+            >
+              加载失败，点这里重试
+            </button>
+          ) : loadingMore ? (
+            "正在加载更多…"
+          ) : (
+            "继续下滑加载更多"
+          )}
+        </div>
+      ) : parks.length > 0 ? (
+        <div className="py-3 text-center text-[11px] text-muted">没有更多了</div>
       ) : null}
 
       {filterOpen ? (
