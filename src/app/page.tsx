@@ -1,10 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import FilterSheet, { type FilterValues } from "@/components/FilterSheet";
 import PackageSheet from "@/components/PackageSheet";
 import {
-  PRICE_STEPS,
   SORT_OPTIONS,
   formatDistance,
   yuan,
@@ -249,17 +248,6 @@ export default function HomePage() {
     };
   }, [locate]);
 
-  const activeFilters = useMemo(() => {
-    return [
-      city,
-      district,
-      industry,
-      type,
-      slot,
-      maxPrice > 0 ? PRICE_STEPS.find((step) => step.value === maxPrice)?.label ?? "" : "",
-    ].filter(Boolean);
-  }, [city, district, industry, type, slot, maxPrice]);
-
   /** 筛选面板里控制的那几项，用来回填面板和算「筛选」上的角标 */
   const filterValues: FilterValues = { district, industry, type, slot, maxPrice };
   const filterCount =
@@ -388,19 +376,29 @@ export default function HomePage() {
             {option.label}
           </button>
         ))}
-      </section>
 
-      <div className="flex items-center justify-between px-1 text-xs text-muted">
-        <span>
-          {loading ? "搜索中…" : `共 ${total} 个车场`}
-          {activeFilters.length ? ` · ${activeFilters.join(" / ")}` : ""}
-        </span>
-        {activeFilters.length || keyword ? (
-          <button className="text-brand" onClick={resetAll}>
+        {city || keyword || filterCount > 0 ? (
+          <button type="button" className="filter-pill shrink-0" onClick={resetAll}>
             清空
           </button>
         ) : null}
-      </div>
+      </section>
+
+      {/* 首屏加载用骨架屏顶着，不出「搜索中」这种字 */}
+      {loading && parks.length === 0 ? (
+        <div className="space-y-3" aria-hidden="true">
+          {[0, 1, 2, 3].map((item) => (
+            <div key={item} className="card animate-pulse p-3">
+              <div className="h-4 w-1/2 rounded bg-black/[0.07]" />
+              <div className="mt-2 h-3 w-3/4 rounded bg-black/[0.05]" />
+              <div className="mt-3 flex gap-1.5">
+                <div className="h-10 w-20 rounded-lg bg-black/[0.05]" />
+                <div className="h-10 w-20 rounded-lg bg-black/[0.05]" />
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : null}
 
       {!loading && parks.length === 0 ? (
         <div className="card p-8 text-center text-sm text-muted">
