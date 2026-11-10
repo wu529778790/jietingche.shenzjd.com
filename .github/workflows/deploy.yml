@@ -279,3 +279,13 @@ jobs:
 
             echo "=== 部署完成 ==="
             sudo docker ps | grep "$CONTAINER"
+
+            # 宿主机端口自检：容器内探活过了，不代表 -p 映射和防火墙放行了
+            echo "=== 宿主机端口自检（$APP_PORT -> 3000） ==="
+            HOST_CODE=$(curl -s -o /dev/null -m 5 -w '%{http_code}' "http://127.0.0.1:$APP_PORT/api/config" || echo "000")
+            if [ "$HOST_CODE" = "200" ]; then
+              echo "宿主机 $APP_PORT 对外映射正常"
+            else
+              echo "⚠️ 宿主机 $APP_PORT 返回 $HOST_CODE：映射或防火墙/安全组需人工确认"
+              sudo docker port "$CONTAINER" || true
+            fi
