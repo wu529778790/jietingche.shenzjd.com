@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
+import { cacheLife } from "next/cache";
 import { cache } from "react";
 import Breadcrumb from "@/components/seo/Breadcrumb";
 import AreaGrid from "@/components/seo/AreaGrid";
@@ -17,6 +18,8 @@ import {
   cityPath,
   cityShort,
   districtPath,
+  LANDING_CACHE_LIFE,
+  LANDING_PAGE_SIZE,
   monthlyText,
   parksJsonLd,
   SITE_NAME,
@@ -27,8 +30,11 @@ interface PageProps {
 }
 
 /**
- * 落地页就是每次请求现查库（价格会变，缓存反而误导用户），
- * cacheComponents 下要显式声明这是阻塞式路由，别在构建期预渲染。
+ * 落地页数据用 use cache 缓存（套餐/列表 5 分钟新鲜度可接受），渲染仍是阻塞式
+ * （instant=false，SEO 要全量 HTML）。缓存头不在页面层解决：阻塞式路由恒发
+ * no-store（见 nextjs blocking-prerender-dynamic），拿不到 s-maxage，
+ * 由 proxy.ts 统一给 /city、/park 下发可被 EdgeOne 缓存的 Cache-Control。
+ * 背景：出口带宽 4-5Mbps，每请求回源 326KB 是 2026-11 性能排查出的瓶颈。
  */
 export const instant = false;
 
@@ -45,6 +51,8 @@ const loadCity = cache(async (raw: string): Promise<CitySeo | null> => {
 });
 
 export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
+  "use cache";
+  cacheLife(LANDING_CACHE_LIFE);
   const { city } = await params;
   const data = await loadCity(city);
   if (!data) return { title: "城市暂无数据", robots: { index: false } };
@@ -72,12 +80,14 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
 }
 
 export default async function CityPage({ params }: PageProps) {
+  "use cache";
+  cacheLife(LANDING_CACHE_LIFE);
   const { city } = await params;
   const data = await loadCity(city);
   if (!data) notFound();
 
   const [parks, otherCities] = await Promise.all([
-    listParksByArea(data.city, "", 100),
+    listParksByArea(data.city, "", LANDING_PAGE_SIZE),
     listCityStats(80),
   ]);
   const short = cityShort(data.city);
@@ -94,7 +104,10 @@ export default async function CityPage({ params }: PageProps) {
       <script
         type="application/ld+json"
         dangerouslySetInnerHTML={{
-          __html: JSON.stringify([breadcrumbJsonLd(crumbs), parksJsonLd(parks, data.city)]).replace(
+          __html: JSON.stringify([
+            breadcrumbJsonLd(crumbs),
+            parksJsonLd(parks.slice(0, 10), data.city),
+          ]).replace(
             /</g,
             "\\u003c",
           ),

@@ -242,7 +242,7 @@ jobs:
                 -v "$DATA_DIR:/app/data" \
                 --env-file "$ENV_FILE" \
                 --memory 768m \
-                --cpus "1.0" \
+                --cpus "2.0" \
                 --log-opt max-size=10m \
                 --log-opt max-file=3 \
                 "$1"
@@ -328,6 +328,33 @@ jobs:
               echo "⚠️ 宿主机 $APP_PORT 返回 $HOST_CODE：映射或防火墙/安全组需人工确认"
               sudo docker port "$CONTAINER" || true
             fi
+
+            # 落地页缓存护栏：SEO 三页必须始终可被 CDN 缓存。
+            # 病根：页面一旦引入请求级依赖（cookies/searchParams），Next 会无声下发
+            # private,no-store，CDN 缓存整个失效且没有任何报错，只有回源变慢。
+            # 这里从首页→城市页→车场页逐级取真实链接，断言缓存头里有 s-maxage。
+            echo "=== 落地页缓存头断言（防 no-store 回归） ==="
+            CITY_ASSERT=$(curl -s -m 5 "http://127.0.0.1:$APP_PORT/" \
+              | grep -o 'href="/city/[^"]*"' | head -1 | cut -d'"' -f2)
+            PARK_ASSERT=$(curl -s -m 5 "http://127.0.0.1:$APP_PORT$CITY_ASSERT" \
+              | grep -o 'href="/park/[^"]*"' | head -1 | cut -d'"' -f2)
+            for p in "/" "$CITY_ASSERT" "$PARK_ASSERT"; do
+              if [ -z "$p" ]; then
+                echo "❌ 未能解析出落地页链接（首页没给 /city/ 或城市页没给 /park/）"
+                exit 1
+              fi
+              cc=$(curl -s -o /dev/null -D - -m 5 "http://127.0.0.1:$APP_PORT$p" \
+                | tr -d '\r' | grep -i '^cache-control:' | head -1)
+              case "$cc" in
+                *s-maxage*)
+                  echo "✓ $p → $cc"
+                  ;;
+                *)
+                  echo "❌ $p 缓存头不含 s-maxage：$cc（页面被改回动态渲染，CDN 会全量回源）"
+                  exit 1
+                  ;;
+              esac
+            done
 
             # 旧的 /opt/jietingche 已废弃（.env 与 uploads 都搬到 data/ 了），新容器确实在跑才删
             if [ "$LEGACY_SITE_DIR" != "$SITE_DIR" ] && sudo test -d "$LEGACY_SITE_DIR"; then

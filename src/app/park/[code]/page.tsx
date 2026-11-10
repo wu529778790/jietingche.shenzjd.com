@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
+import { cacheLife } from "next/cache";
 import { cache } from "react";
 import Breadcrumb from "@/components/seo/Breadcrumb";
 import AreaGrid from "@/components/seo/AreaGrid";
@@ -18,6 +19,7 @@ import {
   cityPath,
   cityShort,
   districtPath,
+  LANDING_CACHE_LIFE,
   monthlyText,
   parkPath,
   SITE_NAME,
@@ -28,7 +30,10 @@ interface PageProps {
   params: Promise<{ code: string }>;
 }
 
-/** 车场页按请求渲染：套餐和价格随时会变，不适合构建期预渲染 */
+/**
+ * 车场页数据 use cache（见城市页注释，缓存头由 proxy 下发）：
+ * 顺带把每次请求都要生成的二维码 dataURL 一起缓存，省掉重复的 QR 编码 CPU。
+ */
 export const instant = false;
 
 /** 同一次请求里 generateMetadata 和页面共用一份数据，别把库查两遍 */
@@ -55,6 +60,8 @@ function parkLabel(name: string): string {
 }
 
 export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
+  "use cache";
+  cacheLife(LANDING_CACHE_LIFE);
   const { code } = await params;
   const data = await loadParkPage(decodeURIComponent(code));
   if (!data) return { title: "车场不存在", robots: { index: false } };
@@ -83,6 +90,8 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
 }
 
 export default async function ParkPage({ params }: PageProps) {
+  "use cache";
+  cacheLife(LANDING_CACHE_LIFE);
   const { code } = await params;
   const data = await loadParkPage(decodeURIComponent(code));
   if (!data) notFound();

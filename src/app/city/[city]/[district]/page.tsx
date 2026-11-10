@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
+import { cacheLife } from "next/cache";
 import { cache } from "react";
 import Breadcrumb from "@/components/seo/Breadcrumb";
 import AreaGrid from "@/components/seo/AreaGrid";
@@ -12,6 +13,8 @@ import {
   cityPath,
   cityShort,
   districtPath,
+  LANDING_CACHE_LIFE,
+  LANDING_PAGE_SIZE,
   monthlyText,
   parksJsonLd,
   SITE_NAME,
@@ -21,7 +24,7 @@ interface PageProps {
   params: Promise<{ city: string; district: string }>;
 }
 
-/** 同城市页：按请求渲染，不在构建期预渲染 */
+/** 同城市页：数据 use cache + proxy 统一下发缓存头（见城市页注释） */
 export const instant = false;
 
 const loadDistrict = cache(async (cityRaw: string, districtRaw: string) => {
@@ -31,7 +34,7 @@ const loadDistrict = cache(async (cityRaw: string, districtRaw: string) => {
   for (const city of cityCandidates) {
     const data = await getDistrictSeo(city, decodeURIComponent(districtRaw));
     if (data.parkCount > 0) {
-      const parks = await listParksByArea(data.city, data.district, 200);
+      const parks = await listParksByArea(data.city, data.district, LANDING_PAGE_SIZE);
       return { ...data, parks };
     }
   }
@@ -39,6 +42,8 @@ const loadDistrict = cache(async (cityRaw: string, districtRaw: string) => {
 });
 
 export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
+  "use cache";
+  cacheLife(LANDING_CACHE_LIFE);
   const { city, district } = await params;
   const data = await loadDistrict(city, district);
   if (!data) return { title: "区域暂无数据", robots: { index: false } };
@@ -63,6 +68,8 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
 }
 
 export default async function DistrictPage({ params }: PageProps) {
+  "use cache";
+  cacheLife(LANDING_CACHE_LIFE);
   const { city, district } = await params;
   const data = await loadDistrict(city, district);
   if (!data) notFound();
@@ -82,7 +89,7 @@ export default async function DistrictPage({ params }: PageProps) {
         dangerouslySetInnerHTML={{
           __html: JSON.stringify([
             breadcrumbJsonLd(crumbs),
-            parksJsonLd(data.parks, data.city),
+            parksJsonLd(data.parks.slice(0, 10), data.city),
           ]).replace(/</g, "\\u003c"),
         }}
       />

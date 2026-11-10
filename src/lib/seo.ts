@@ -17,6 +17,16 @@ export function absoluteUrl(path: string): string {
   return `${SITE_URL}${path.startsWith("/") ? path : `/${path}`}`;
 }
 
+/**
+ * 落地页（city/district/park）缓存策略，三个页面统一引用：
+ * 浏览器 max-age 60s，CDN s-maxage 300s（每 5 分钟回源刷一次），过期后还有 SWR 余量。
+ * 改这里即可同步调整三页。
+ */
+export const LANDING_CACHE_LIFE = { stale: 60, revalidate: 300, expire: 86400 } as const;
+
+/** 落地页车场列表条数：100+ 条把 HTML 撑到 326KB，40 条足够覆盖「最划算」的长尾 */
+export const LANDING_PAGE_SIZE = 40;
+
 export function parkPath(code: string): string {
   return `/park/${encodeURIComponent(code)}`;
 }
