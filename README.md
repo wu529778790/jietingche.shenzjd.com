@@ -98,17 +98,19 @@ npm run toy -- --snapshot data/jtc-snapshot.json        # B站 Toy → platforms
 | --- | --- | --- |
 | `/` | 公开 | 访客搜索：定位/关键词 + 业态、套餐类型、时段、城市、区域、价格筛选 → 点套餐出二维码 |
 | `/admin/login` | 公开 | 管理后台登录 |
-| `/admin/parks` | 后台 | 车场库：配每个套餐的专属码，以及全局兜底推广码 |
+| `/admin/parks` | 后台 | 车场库：维护车场与套餐（码不在这里配） |
 | `/admin/logs` | 后台 | 投放台账 |
 | `/admin/stats` | 后台 | 对账（浏览/下单/佣金） |
 
-二维码规则：套餐有专属码就用专属码，没有就用 `/admin/parks` 里配的兜底推广码。
-**上线前记得先传一张兜底码，否则访客看不到码。**
+二维码规则：**全部前端现场生成，后台不存任何码图。**
+码内容 = `m.jparking.cn` 套餐直达链接（`parkCode` + `sourcePackageId` + `shareCode`），
+车场缺官方编码时退到官方搜索页链接。`shareCode` 取 `app_config.share_code`，
+没配则读环境变量 `JTC_SHARE_CODE`，再没有就用 `src/lib/types.ts` 里的兜底值。
 
 ## 后台鉴权
 
 `src/proxy.ts`（Next 16 的 proxy 约定，即原 middleware）拦住 `/admin/*` 和 `/api/*`。公开白名单：
-`GET /api/search`、`GET /api/facets`、`GET /api/locate`、`GET /api/config`（首页要读兜底码），
+`GET /api/search`、`GET /api/facets`、`GET /api/locate`、`GET /api/config`（首页要读 shareCode），
 加上登录/登出接口和 `/admin/login` 本身。其余读写接口、车场库/台账/对账全部要登录态。
 `/api/v1/*` 是同一批接口的对外别名（`next.config` 里 rewrite 到 `/api/*`），proxy 判定时按别名归一。
 
