@@ -131,6 +131,7 @@ export {
   cleanRuleSummary,
   isLongTerm,
   LONG_TERM_DAYS,
+  LONG_TERM_TYPES,
   monthlyPrice,
   shortPackageName,
   tidyRuleSummary,

@@ -4,6 +4,7 @@ import { useMemo } from "react";
 import { packageQrDataUrl } from "@/lib/qr";
 import {
   formatDistance,
+  monthlyPrice,
   shortPackageName,
   tidyRuleSummary,
   yuan,
@@ -73,6 +74,11 @@ export default function PackageSheet({ park, pkg, onClose, shareCode = "" }: Pro
           ) : null}
           {pkg.originPrice > pkg.price ? (
             <span className="text-muted line-through">¥{yuan(pkg.originPrice)}</span>
+          ) : null}
+          {pkg.price > 0 && pkg.durationDays >= 60 ? (
+            <span className="text-muted">
+              折合 ¥{yuan(monthlyPrice(pkg.price, pkg.durationDays))}/月
+            </span>
           ) : null}
           {facts.map((fact) => (
             <span key={fact} className="rounded-md bg-brand/10 px-1.5 py-0.5 text-brand">

@@ -122,6 +122,15 @@ export function monthlyPrice(price: number, durationDays: number): number {
 /** 长租卡：够一个月及以上，排序时优先于日卡/次卡 */
 export const LONG_TERM_DAYS = 25;
 
-export function isLongTerm(durationDays: number): boolean {
-  return (durationDays || 0) >= LONG_TERM_DAYS;
+/**
+ * 真正的长租卡种。次卡也会带 duration_days=30（表示 30 天有效期，如「30 天 5 次」），
+ * 只看天数会把 5 次卡当成月卡，按折合月价顶到真月卡前面。
+ */
+export const LONG_TERM_TYPES = ["月卡", "季卡", "半年卡", "年卡"] as const;
+
+export function isLongTerm(typeLabel: string, durationDays: number): boolean {
+  return (
+    (durationDays || 0) >= LONG_TERM_DAYS &&
+    (LONG_TERM_TYPES as readonly string[]).includes(typeLabel)
+  );
 }

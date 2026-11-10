@@ -7,6 +7,7 @@ import PackageSheet from "@/components/PackageSheet";
 import {
   SORT_OPTIONS,
   formatDistance,
+  monthlyPrice,
   shortPackageName,
   yuan,
   type Package,
@@ -471,6 +472,12 @@ export default function HomePage() {
                     <span className="text-[10px] text-muted line-through">¥{yuan(pkg.originPrice)}</span>
                   ) : null}
                 </div>
+                {/* 季卡/年卡总价高，露出折合月价才比得动月卡 */}
+                {pkg.price > 0 && pkg.durationDays >= 60 ? (
+                  <div className="text-[10px] text-muted">
+                    折合 ¥{yuan(monthlyPrice(pkg.price, pkg.durationDays))}/月
+                  </div>
+                ) : null}
               </button>
             ))}
             {park.packages.length > 6 ? (

@@ -6,6 +6,7 @@ import { CONFIG_KEYS } from "./schema";
 import {
   DEFAULT_SHARE_CODE,
   FOCUS_CITIES,
+  LONG_TERM_DAYS,
   distanceMeters,
   type CarPark,
   type Package,
@@ -29,12 +30,43 @@ interface PackageFilter {
   maxPrice?: number;
 }
 
+/** 折合每月价格（分）：月卡/季卡/年卡/日卡混在一起时，只有月均可比 */
+function monthlySql(prefix: string): string {
+  return `ROUND(${prefix}price * 30.0 / MAX(${prefix}duration_days, 1))`;
+}
+
+/**
+ * 长租卡（月/季/半年/年卡，且周期够一个月）排在日卡/次卡前面。
+ * 次卡也会带 duration_days=30（30 天有效期、限 5 次），只看天数会把它当月卡。
+ */
+const LONG_TERM_TYPE_SQL = "'月卡','季卡','半年卡','年卡'";
+
+function longTermSql(prefix: string): string {
+  return (
+    `CASE WHEN ${prefix}type_label IN (${LONG_TERM_TYPE_SQL}) ` +
+    `AND ${prefix}duration_days >= ${LONG_TERM_DAYS} THEN 0 ELSE 1 END`
+  );
+}
+
+/**
+ * 官方池里的「付定金专用」是经销商下单用的虚拟商品（10 元、规则只到 00:00-01:00），
+ * 不是可售月卡，按最低价排序会直接顶到首屏，前台统一排掉。
+ */
+const PLACEHOLDER_WORDS = ["定金", "订金", "占位", "测试", "补差"];
+
+function notPlaceholderSql(prefix: string): string {
+  return PLACEHOLDER_WORDS.map((word) => `${prefix}name NOT LIKE '%${word}%'`).join(" AND ");
+}
+
 /** 把套餐条件拼成 SQL 片段，条件里的列名统一带 pk 前缀时用 alias */
 function packageConds(filter: PackageFilter, alias = ""): { sql: string[]; args: (string | number)[] } {
   const p = alias ? `${alias}.` : "";
   const sql: string[] = [];
   const args: (string | number)[] = [];
-  if (filter.activeOnly !== false) sql.push(`${p}status = 'active'`);
+  if (filter.activeOnly !== false) {
+    sql.push(`${p}status = 'active'`);
+    sql.push(notPlaceholderSql(p));
+  }
   if (filter.type) {
     sql.push(`${p}type_label = ?`);
     args.push(filter.type);
@@ -44,7 +76,8 @@ function packageConds(filter: PackageFilter, alias = ""): { sql: string[]; args:
     args.push(filter.slot);
   }
   if (filter.maxPrice && filter.maxPrice > 0) {
-    sql.push(`${p}price > 0 AND ${p}price <= ?`);
+    // maxPrice 是「月均预算」：填 ¥300 内时，年卡 3000（月均 250）也应该命中
+    sql.push(`${p}price > 0 AND ${monthlySql(p)} <= ?`);
     args.push(filter.maxPrice);
   }
   return { sql, args };
@@ -60,7 +93,9 @@ async function packagesByPark(
   const conds = [`park_id IN (${placeholders(ids.length)})`];
   const { sql, args } = packageConds(filter);
   const res = await db.execute({
-    sql: `SELECT * FROM packages WHERE ${[...conds, ...sql].join(" AND ")} ORDER BY price ASC`,
+    // 长租卡在前，同卡种按折合月均排：一个车场的日卡不会挤掉它的月卡
+    sql: `SELECT * FROM packages WHERE ${[...conds, ...sql].join(" AND ")}
+          ORDER BY ${longTermSql("")} ASC, ${monthlySql("")} ASC, price ASC`,
     args: [...ids, ...args],
   });
   for (const row of res.rows) {
@@ -371,8 +406,6 @@ export async function searchPublic(input: SearchInput): Promise<SearchResult> {
 
   const parkConds: string[] = [];
   const parkArgs: (string | number)[] = [];
-  const pkgConds = ["k.status = 'active'"];
-  const pkgArgs: (string | number)[] = [];
 
   const kw = (input.q ?? "").trim();
   if (kw) {
@@ -393,18 +426,18 @@ export async function searchPublic(input: SearchInput): Promise<SearchResult> {
     parkConds.push("c.industry = ?");
     parkArgs.push(input.industry);
   }
-  if (input.type) {
-    pkgConds.push("k.type_label = ?");
-    pkgArgs.push(input.type);
-  }
-  if (input.slot) {
-    pkgConds.push("k.period = ?");
-    pkgArgs.push(input.slot);
-  }
-  if (input.maxPrice && input.maxPrice > 0) {
-    pkgConds.push("k.price > 0 AND k.price <= ?");
-    pkgArgs.push(input.maxPrice);
-  }
+  // 套餐条件与后台/详情页共用一套口径（含排除官方「付定金专用」这类占位套餐）
+  const pkgFilter = packageConds(
+    {
+      activeOnly: true,
+      type: input.type,
+      slot: input.slot,
+      maxPrice: input.maxPrice,
+    },
+    "k",
+  );
+  const pkgConds = pkgFilter.sql;
+  const pkgArgs = pkgFilter.args;
 
   const lat = typeof input.lat === "number" ? input.lat : 0;
   const lng = typeof input.lng === "number" ? input.lng : 0;
@@ -423,14 +456,27 @@ export async function searchPublic(input: SearchInput): Promise<SearchResult> {
   /** 公里 → 度²，给圈层阈值用 */
   const deg2 = (km: number) => ((km / 111.32) ** 2).toFixed(10);
 
-  let orderSql = "MIN(k.price) ASC";
+  /**
+   * 比价口径：先「有长租卡的车场」，再按长租卡的折合月均，最后才看全量月均。
+   * 直接按 MIN(price) 排会把 ¥8 的「夜间套餐 1 夜」日卡顶到月卡前面，
+   * 而访客要买的是月卡；季卡/年卡也只有折合月均后才和月卡可比。
+   * 只有日卡/次卡的车场（MIN 为 NULL）用一个大数兜底，排在长租卡车场之后。
+   */
+  const cheapLongTerm =
+    `MIN(CASE WHEN k.type_label IN (${LONG_TERM_TYPE_SQL}) ` +
+    `AND k.duration_days >= ${LONG_TERM_DAYS} THEN ${monthlySql("k.")} END)`;
+  const priceOrder =
+    `COALESCE(${cheapLongTerm}, 2147483647) ASC, ` +
+    `MIN(${monthlySql("k.")}) ASC, MIN(k.price) ASC`;
+
+  let orderSql = priceOrder;
   if (input.sort === "distance" && hasGeo) {
-    orderSql = `${dist2Sql} ASC, MIN(k.price) ASC`;
+    orderSql = `${dist2Sql} ASC, ${priceOrder}`;
     orderArgs.push(lat, lat, lng, lng, cosLat);
   } else if (input.sort === "price") {
-    orderSql = "MIN(k.price) ASC";
+    orderSql = priceOrder;
   } else if (input.sort === "commission") {
-    orderSql = "MAX(k.commission) DESC";
+    orderSql = `MAX(k.commission) DESC`;
   } else if (hasGeo) {
     // 推荐 = 官方 sortMode=1 的本地版：先给走得到的（1/3/10km），同圈层内比价。
     // 不按佣金排——佣金是商家侧指标，按它排会把远且贵的顶到首屏。
@@ -438,7 +484,7 @@ export async function searchPublic(input: SearchInput): Promise<SearchResult> {
       `CASE WHEN ${dist2Sql} <= ${deg2(1)} THEN 0 ` +
       `WHEN ${dist2Sql} <= ${deg2(3)} THEN 1 ` +
       `WHEN ${dist2Sql} <= ${deg2(10)} THEN 2 ELSE 3 END`;
-    orderSql = `${tier} ASC, MIN(k.price) ASC`;
+    orderSql = `${tier} ASC, ${priceOrder}`;
     for (let i = 0; i < 3; i += 1) orderArgs.push(lat, lat, lng, lng, cosLat);
   }
 
