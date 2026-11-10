@@ -1,7 +1,8 @@
 # 找停车（jietingche）
 
 按位置和需求找停车场优惠套餐（月卡 / 季卡 / 夜间包月…），选好套餐直接扫码办理。
-数据来自捷停车分销选品池。**访客只看得到首页这一个页面**：搜索 → 筛选 → 出码。
+数据来自捷停车分销选品池。访客链路：**首页搜索 → 城市/区域/车场落地页 → 出码**，
+落地页全部服务端渲染，专门给搜索引擎和分享落地用（见「SEO / 落地页」）。
 管理端全部收在 `/admin/*`，需要口令才能进，前台没有任何入口暴露它们。
 
 ## 开发
@@ -43,7 +44,15 @@ node --no-warnings scripts/enrich-jtc.mjs        # 补套餐类型/时段/时长
 # 2. 洗入业务库（幂等，重复跑只更新不重复）
 node --no-warnings scripts/import-jtc.mjs
 node --no-warnings scripts/import-jtc.mjs --city 深圳市   # 只导一个城市
+
+# 3. 存量数据清洗（幂等；导入侧已边导边洗，这个只刷已经进库的旧数据）
+npm run db:clean                          # 有 TURSO_* 就清线上，否则清 data/app.db
+npm run db:clean -- --local --dry         # 只预演本地库，看看要改多少行
 ```
+
+清洗规则收口在 `src/lib/packageText.ts`：官方套餐名里的 `<畅停无忧>` 这类推荐标签、
+拼接下划线、车场名前缀和尾部冗余时长都会去掉（`金銮国际商务大厦停车场（<禁停一期地库>夜间套餐1月）`
+→ `夜间套餐`）；规则摘要里的「工作日 工作日 18:30-08:30」会压成「工作日 18:30-08:30」。
 
 **为什么要网格补抓**：`query_package_list` 只认查询坐标，按距离由近到远分页，
 传 `cityCode` / `canton` 之类的行政区参数都无效；一个市中心点只能覆盖半径内的套餐，
@@ -97,10 +106,34 @@ npm run toy -- --snapshot data/jtc-snapshot.json        # B站 Toy → platforms
 | 路径 | 归属 | 用途 |
 | --- | --- | --- |
 | `/` | 公开 | 访客搜索：定位/关键词 + 业态、套餐类型、时段、城市、区域、价格筛选 → 点套餐出二维码 |
+| `/park/[parkCode]` | 公开 | 车场落地页：套餐表、折合月价、现场出码、周边车场内链（SSR，给搜索引擎收录） |
+| `/city/[city]` | 公开 | 城市落地页：区域入口 + 月价最低的车场榜 |
+| `/city/[city]/[district]` | 公开 | 区域落地页：该区可办月卡的车场列表 |
+| `/sitemap.xml` | 公开 | 运行时生成的 sitemap（首页 + 城市 + 区域 + 有在售套餐的车场） |
+| `/robots.txt` | 公开 | 放行全站，屏蔽 `/admin`、`/api`，指向 sitemap |
 | `/admin/login` | 公开 | 管理后台登录 |
 | `/admin/parks` | 后台 | 车场库：维护车场与套餐（码不在这里配） |
 | `/admin/logs` | 后台 | 投放台账 |
 | `/admin/stats` | 后台 | 对账（浏览/下单/佣金） |
+
+## SEO / 落地页
+
+首页的搜索列表是客户端拉的，爬虫拿不到；所以另开了三层服务端渲染的落地页，
+首页底部再补一组 SSR 的「城市 / 热门区域 / 最低价车场」入口，把
+「首页 → 城市 → 区域 → 车场」这条路打通：
+
+- 城市/区域/车场页都有独立的 title、description、canonical、og，以及
+  `BreadcrumbList` + `ParkingFacility` / `ItemList` 结构化数据；
+- 车场页的二维码是服务端现场生成的（`src/lib/qr.ts` 纯 JS，SSR 可跑）；
+- 只把「有在售套餐」的车场写进 sitemap，避免空页面被索引（当前约 8000 条车场 + 城市/区域）；
+- `sitemap.xml` 是运行时 Route Handler，进程内缓存 30 分钟，构建期不查库
+  （CI 没有数据库也能过构建）。
+
+线上域名通过 `NEXT_PUBLIC_SITE_URL` 覆盖，不配就用
+`https://jietingche.shenzjd.com`（canonical 不能指到 localhost）。
+
+价格口径：站内所有「最低价 / 排序 / 价格筛选」都按**折合月价**（`price * 30 / duration_days`），
+长租卡（月/季/半年/年卡）优先于日卡/次卡；官方池里的「付定金专用」占位套餐在前台统一排除。
 
 二维码规则：**全部前端现场生成，后台不存任何码图。**
 码内容 = `m.jparking.cn` 套餐直达链接（`parkCode` + `sourcePackageId` + `shareCode`），
