@@ -21,9 +21,11 @@ export const EMPTY_FILTERS: FilterValues = {
 
 interface Props {
   value: FilterValues;
-  /** 选了城市才展示「区域」，城市由外面那条下拉控制 */
+  /** 当前城市；面板里和「区域」放同一块，切了立刻生效（区域选项跟着换） */
   city: string;
+  cities: string[];
   districts: string[];
+  onPickCity: (name: string) => void;
   onClose: () => void;
   onApply: (next: FilterValues) => void;
 }
@@ -62,10 +64,18 @@ function Option({
 }
 
 /**
- * 筛选面板：和官方分享中心一致，顶部筛选条只放一个入口，业态/套餐/时段/价格/区域都在面板里选，
- * 点「确定」才生效，「重置」只清空面板里的草稿。
+ * 筛选面板：城市和区域放在同一块（先城市后区域，城市一换区域选项跟着换），
+ * 其余业态/套餐/时段/价格都走草稿，点「确定」才生效，「重置」只清空面板里的草稿。
  */
-export default function FilterSheet({ value, city, districts, onClose, onApply }: Props) {
+export default function FilterSheet({
+  value,
+  city,
+  cities,
+  districts,
+  onPickCity,
+  onClose,
+  onApply,
+}: Props) {
   const [draft, setDraft] = useState<FilterValues>(value);
   const patch = (next: Partial<FilterValues>) => setDraft((prev) => ({ ...prev, ...next }));
 
@@ -86,6 +96,42 @@ export default function FilterSheet({ value, city, districts, onClose, onApply }
         </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-3 pt-3">
+          <Section label="城市">
+            <select
+              className="field w-full"
+              value={city}
+              onChange={(e) => {
+                // 城市换了区域就作废，先把草稿里的区域清掉再切城市
+                patch({ district: "" });
+                onPickCity(e.target.value);
+              }}
+            >
+              <option value="">全国</option>
+              {cities.map((name) => (
+                <option key={name} value={name}>
+                  {name.replace(/市$/, "")}
+                </option>
+              ))}
+            </select>
+          </Section>
+
+          {city && districts.length ? (
+            <Section label="区域">
+              <Option active={draft.district === ""} onClick={() => patch({ district: "" })}>
+                全部
+              </Option>
+              {districts.map((item) => (
+                <Option
+                  key={item}
+                  active={draft.district === item}
+                  onClick={() => patch({ district: draft.district === item ? "" : item })}
+                >
+                  {item}
+                </Option>
+              ))}
+            </Section>
+          ) : null}
+
           <Section label="业态">
             <Option active={draft.industry === ""} onClick={() => patch({ industry: "" })}>
               全部
@@ -143,22 +189,6 @@ export default function FilterSheet({ value, city, districts, onClose, onApply }
             ))}
           </Section>
 
-          {city && districts.length ? (
-            <Section label={`区域 · ${city.replace(/市$/, "")}`}>
-              <Option active={draft.district === ""} onClick={() => patch({ district: "" })}>
-                全部
-              </Option>
-              {districts.map((item) => (
-                <Option
-                  key={item}
-                  active={draft.district === item}
-                  onClick={() => patch({ district: draft.district === item ? "" : item })}
-                >
-                  {item}
-                </Option>
-              ))}
-            </Section>
-          ) : null}
         </div>
 
         <div className="flex gap-2 border-t border-border px-4 py-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))]">

@@ -529,7 +529,9 @@ export default function HomePage() {
         <FilterSheet
           value={filterValues}
           city={city}
+          cities={facets.cities.map((item) => item.name)}
           districts={facets.districts.map((item) => item.name)}
+          onPickCity={chooseCity}
           onClose={() => setFilterOpen(false)}
           onApply={applyFilters}
         />
