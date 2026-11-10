@@ -77,6 +77,8 @@ export default function HomePage() {
   const [geoError, setGeoError] = useState("");
 
   const [facets, setFacets] = useState<Facets>(EMPTY_FACETS);
+  /** 切城市后区域还在拉取：位置弹层用骨架屏占位，别让区域块突然空一块 */
+  const [districtsLoading, setDistrictsLoading] = useState(false);
   /** 分佣码：弹层里现场生成套餐直达码用 */
   const [shareCode, setShareCode] = useState("");
 
@@ -131,7 +133,8 @@ export default function HomePage() {
           slots: next.slots.length ? next.slots : prev.slots,
         }));
       })
-      .catch(() => undefined);
+      .catch(() => undefined)
+      .finally(() => setDistrictsLoading(false));
   }, [city]);
 
   const fetchList = useCallback(
@@ -297,6 +300,7 @@ export default function HomePage() {
   /** 「位置」弹层里选城市：切城市要顺手清掉区域，不然会筛出空结果 */
   function chooseCity(name: string) {
     cityTouched.current = true;
+    if (name !== city) setDistrictsLoading(true);
     setCity(name);
     setDistrict("");
   }
@@ -507,6 +511,7 @@ export default function HomePage() {
           cities={facets.cities.map((item) => item.name)}
           district={district}
           districts={facets.districts.map((item) => item.name)}
+          districtsLoading={districtsLoading}
           onPickCity={chooseCity}
           onPickDistrict={setDistrict}
           onClose={() => setLocationOpen(false)}

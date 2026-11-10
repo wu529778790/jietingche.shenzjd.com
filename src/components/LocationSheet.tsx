@@ -7,6 +7,8 @@ interface Props {
   cities: string[];
   district: string;
   districts: string[];
+  /** 切了城市、区域还在拉：用骨架屏占位，别让「区域」这一块空着 */
+  districtsLoading?: boolean;
   /** 城市和区域都是点完即生效，不用再确认 */
   onPickCity: (name: string) => void;
   onPickDistrict: (name: string) => void;
@@ -19,6 +21,7 @@ export default function LocationSheet({
   cities,
   district,
   districts,
+  districtsLoading = false,
   onPickCity,
   onPickDistrict,
   onClose,
@@ -55,7 +58,18 @@ export default function LocationSheet({
             </select>
           </Section>
 
-          {city && districts.length ? (
+          {city && districtsLoading ? (
+            // 切城市后区域还没回来：骨架屏占位，形状跟下面的 Option 对齐。
+            // 必须先于「有数据」判断，否则会先闪一下上一个城市的区域
+            <Section label="区域">
+              {[0, 1, 2, 3, 4, 5].map((item) => (
+                <div
+                  key={item}
+                  className="h-8 w-[72px] animate-pulse rounded-lg bg-black/[0.06]"
+                />
+              ))}
+            </Section>
+          ) : city && districts.length ? (
             <Section label="区域">
               <Option active={district === ""} onClick={() => onPickDistrict("")}>
                 全部
