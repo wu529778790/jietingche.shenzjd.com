@@ -169,6 +169,24 @@ jobs:
               sudo chmod 600 "$SITE_DIR/.env"
             fi
 
+            echo "=== 环境自检：容器里的 DB 配置能不能通 ==="
+            # 只打 URL、token 长度和哈希前缀，不泄露 token 本身
+            sudo docker run --rm --env-file "$SITE_DIR/.env" "$IMAGE" node -e '
+              const c = require("crypto");
+              const url = process.env.TURSO_DATABASE_URL || "";
+              const token = process.env.TURSO_AUTH_TOKEN || "";
+              console.log("URL:", JSON.stringify(url), "len", url.length);
+              console.log("TOKEN len", token.length, "sha", c.createHash("sha256").update(token).digest("hex").slice(0, 12));
+              const endpoint = url.replace(/^libsql:\/\//, "https://") + "/v2/pipeline";
+              fetch(endpoint, {
+                method: "POST",
+                headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" },
+                body: JSON.stringify({ requests: [{ type: "execute", stmt: { sql: "select 1" } }, { type: "close" }] }),
+              })
+                .then(async (r) => console.log("PIPELINE", r.status, (await r.text()).slice(0, 160)))
+                .catch((e) => console.log("PIPELINE ERROR", e.message));
+            '
+
             run_container() {
               sudo docker run -d \
                 --name "$CONTAINER" \
