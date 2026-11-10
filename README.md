@@ -13,12 +13,22 @@ npm run build   # 生产构建
 ```
 
 数据库：配了 `TURSO_DATABASE_URL`（+ `TURSO_AUTH_TOKEN`）走远程 libsql，
-否则落到本地 `data/app.db`（首次访问自动建表）。
+否则落到本地 `data/app.db`（首次访问自动建表）。这两个值写在 `.env.local` 里（已 gitignore），
+所以本地开发也是直连线上那个 Turso 库，不再各自一份数据。
 
-**数据库只在本地，不入库**：`data/app.db` 是业务库，`data/jtc.db` 是官方选品池原始库
-（`enrich-jtc` / `import-jtc` / `build-minitool` 都依赖它）。换一台电脑或部署到服务器时，
-这两个文件要自己拷过去，或在新机器上按下面的流程重跑爬虫；从 git 拉代码**不会**带数据库。
-WAL/SHM、爬虫日志、`.DS_Store`、`public/uploads/` 里的二维码图片同样不入库，也要单独带走。
+**把本地库整库搬到 Turso**（幂等，重复跑只覆盖不重复）：
+
+```bash
+npm run db:push              # 默认 data/app.db
+npm run db:push -- data/jtc.db
+```
+
+脚本读 `.env.local` 里的凭证，按本地 `sqlite_master` 建表建索引，再按 200 行一批
+`INSERT OR REPLACE`，最后逐表对行数。
+
+`data/app.db` 是业务库，`data/jtc.db` 是官方选品池原始库（`enrich-jtc` / `import-jtc` /
+`build-minitool` 都依赖它），两者都不入库。`public/uploads/` 里的二维码图片同样不入库，
+线上通过 Docker 卷持久化。
 
 ## 数据：爬取 → 清洗导入
 
@@ -70,12 +80,12 @@ node --no-warnings scripts/import-jtc.mjs --city 深圳市   # 只导一个城�
 
 ## 后台鉴权
 
-`src/middleware.ts` 拦住 `/admin/*` 和 `/api/*`。公开白名单只有三项：
+`src/proxy.ts`（Next 16 的 proxy 约定，即原 middleware）拦住 `/admin/*` 和 `/api/*`。公开白名单只有三项：
 `GET /api/search`、`GET /api/facets`、`GET /api/config`（首页要读兜底码），
 加上登录/登出接口和 `/admin/login` 本身。其余读写接口、车场库/台账/对账全部要登录态。
 
 ```bash
-# 生产必须配置，容器启动时注入即可（middleware 用 Node 运行时，不需要构建期写死）
+# 生产必须配置，容器启动时注入即可（proxy 固定跑 Node 运行时，不需要构建期写死）
 ADMIN_PASSWORD='换成一个强口令'
 ```
 
@@ -86,12 +96,31 @@ ADMIN_PASSWORD='换成一个强口令'
 `src/lib/adminTypes.ts` 放台账/对账类型，`src/lib/rows.ts` 放 libsql `Row` → 业务对象的映射（仅服务端）。
 `PackageSheet` 只保留访客出码逻辑，原先混在里面的话术、记台账等推广员功能已删除。
 
+## 部署（GitHub Actions → 自己服务器）
+
+`.github/workflows/deploy.yml`：push main 自动跑「类型检查 + lint + 构建」→ 构建镜像推 GHCR →
+SSH 到服务器拉取换容器。服务器上只要有 Docker，数据全在 Turso，容器本身无状态。
+
+服务器上 `/opt/jietingche`（可用 `DEPLOY_SITE_DIR` 改）：
+
+- `.env`：`TURSO_DATABASE_URL` / `TURSO_AUTH_TOKEN` / `ADMIN_PASSWORD`。首次部署若不存在，
+  会用 GitHub secrets 自动生成（chmod 600），之后以服务器上这份为准。
+- `uploads/`：挂到容器 `/app/public/uploads`，存后台上传的推广码图片，换容器不丢。
+
+仓库 Settings → Secrets 需要配：`DEPLOY_HOST`、`DEPLOY_USER`、`DEPLOY_PASSWORD`、
+`TURSO_DATABASE_URL`、`TURSO_AUTH_TOKEN`、`ADMIN_PASSWORD`，可选 `DEPLOY_PORT`（默认 22）、
+`DEPLOY_SITE_DIR`（默认 `/opt/jietingche`）、`APP_PORT`（默认 3000）。
+
+部署顺序是「拉镜像 → 临时容器预检 → 换容器 → 容器内探活」，任一步失败都保留旧容器/
+旧镜像（`jietingche:previous`）可回滚，不会出现停服又拉不起来的情况。
+
 ## 接口
 
 公开：
 
 - `GET /api/search?q=&city=&district=&industry=&type=&slot=&maxPrice=&sort=&lat=&lng=&page=`
 - `GET /api/facets?city=` 筛选栏分面
+- `GET /api/locate?lat=&lng=` 定位反查城市（前端定位后自动选中）
 - `GET /api/config` 读兜底推广码
 
 需登录（后台）：

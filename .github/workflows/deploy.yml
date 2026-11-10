@@ -1,0 +1,247 @@
+name: Build & Deploy
+
+# 单链路：校验 → 构建镜像 → 服务器拉取换容器。
+#
+# 为什么是「CI 构建镜像 + 服务器 pull」而不是「传源码上去本机 build」：
+#   - 这台应用带 Next + Tailwind 整套构建，服务器本机 build 会吃满 CPU/内存，
+#     而镜像构建放在 CI 上跑不影响线上；服务器只做 pull + run。
+#   - 镜像拉不动是真踩过的坑（GHCR 跨境），所以这里保留 30 分钟超时、
+#     并且「拉不到就退出，旧容器不动」。
+#
+# 数据库在 Turso（远程 libsql），容器无状态：
+#   - 容器里不落任何业务数据，只有 public/uploads（推广码图片）需要持久化，
+#     挂到站点目录下的 uploads/。
+#   - TURSO_* 与 ADMIN_PASSWORD 通过服务器上的 .env 注入（--env-file），
+#     不进镜像；首次部署若 .env 不存在，会用 GitHub secrets 生成一份。
+#
+# 首次启用前要在仓库 Settings → Secrets and variables → Actions 配好：
+#   DEPLOY_HOST          服务器地址
+#   DEPLOY_USER          SSH 用户
+#   DEPLOY_PASSWORD      SSH 密码（用密钥的话改成 DEPLOY_SSH_KEY 并换 appleboy 的 key 参数）
+#   DEPLOY_PORT          SSH 端口，可省略（默认 22）
+#   DEPLOY_SITE_DIR      站点目录，可省略（默认 /opt/jietingche）
+#   APP_PORT             对外端口，可省略（默认 3000）
+#   TURSO_DATABASE_URL   数据库地址
+#   TURSO_AUTH_TOKEN     数据库 token
+#   ADMIN_PASSWORD       管理后台口令（不配，线上后台会 503）
+#
+# 服务器上只需要：Docker、能访问 ghcr.io、以及一个能写的站点目录。
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  # 同一时间只跑一条，避免两次 push 抢着换容器；
+  # 不 cancel 正在跑的那条——部署脚本跑到一半被打断会留下「旧容器已删、新容器没起」
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    name: 类型检查 + lint + 构建
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: 安装依赖
+        run: npm ci
+
+      - name: 类型检查
+        run: npx tsc --noEmit
+
+      - name: lint
+        run: npm run lint
+
+      # 构建期不需要数据库：页面都是客户端组件 / 动态接口，这里不注入 TURSO_*
+      - name: 生产构建
+        run: npm run build
+        env:
+          NEXT_TELEMETRY_DISABLED: 1
+
+  build:
+    name: 构建并推送镜像
+    needs: verify
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: 镜像名
+        run: echo "IMAGE_NAME=ghcr.io/$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_ENV"
+
+      - uses: docker/setup-buildx-action@v4
+
+      - name: 登录 GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 构建并推送
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ env.IMAGE_NAME }}:latest
+            ${{ env.IMAGE_NAME }}:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy:
+    name: 部署到服务器
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - name: 检查必需 secret
+        run: |
+          for name in DEPLOY_HOST DEPLOY_USER TURSO_DATABASE_URL TURSO_AUTH_TOKEN; do
+            eval "value=\${$name}"
+            if [ -z "$value" ]; then
+              echo "::error::缺少 secret $name"
+              exit 1
+            fi
+          done
+          echo "必需 secret 已配置"
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+
+      - name: SSH 部署
+        uses: appleboy/ssh-action@v1
+        env:
+          DEPLOY_SITE_DIR: ${{ secrets.DEPLOY_SITE_DIR }}
+          APP_PORT: ${{ secrets.APP_PORT }}
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          password: ${{ secrets.DEPLOY_PASSWORD }}
+          port: ${{ secrets.DEPLOY_PORT || 22 }}
+          envs: DEPLOY_SITE_DIR,APP_PORT
+          command_timeout: 30m
+          script: |
+            set -eu
+            IMAGE="ghcr.io/$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]'):latest"
+            CONTAINER="jietingche"
+            SITE_DIR="${DEPLOY_SITE_DIR:-/opt/jietingche}"
+            APP_PORT="${APP_PORT:-3000}"
+            PRECHECK="${CONTAINER}-precheck"
+
+            echo "=== 登录 GHCR 并拉取镜像 ==="
+            # login 不带 sudo 会把凭据写进 SSH 用户的 ~/.docker，sudo pull 读的是 /root/.docker
+            echo "${{ secrets.GITHUB_TOKEN }}" | sudo docker login ghcr.io -u ${{ github.actor }} --password-stdin
+            sudo docker pull "$IMAGE"
+            # 拉完立刻登出：留着这个 job 级 token 会让之后所有 pull 被打成 denied
+            sudo docker logout ghcr.io || true
+
+            echo "=== 准备站点目录 ==="
+            sudo mkdir -p "$SITE_DIR/uploads"
+            # 容器里以 nextjs(1001) 运行，上传目录得让它可写
+            sudo chown -R 1001:1001 "$SITE_DIR/uploads"
+            if ! sudo test -f "$SITE_DIR/.env"; then
+              echo "未找到 $SITE_DIR/.env，按 GitHub secrets 生成"
+              {
+                echo "TURSO_DATABASE_URL=${{ secrets.TURSO_DATABASE_URL }}"
+                echo "TURSO_AUTH_TOKEN=${{ secrets.TURSO_AUTH_TOKEN }}"
+                echo "ADMIN_PASSWORD=${{ secrets.ADMIN_PASSWORD }}"
+              } | sudo tee "$SITE_DIR/.env" >/dev/null
+              sudo chmod 600 "$SITE_DIR/.env"
+            fi
+
+            run_container() {
+              sudo docker run -d \
+                --name "$CONTAINER" \
+                --restart unless-stopped \
+                -p "$APP_PORT:3000" \
+                -v "$SITE_DIR/uploads:/app/public/uploads" \
+                --env-file "$SITE_DIR/.env" \
+                --memory 768m \
+                --cpus "1.0" \
+                --log-opt max-size=10m \
+                --log-opt max-file=3 \
+                "$1"
+            }
+
+            # 容器内探活：/api/config 是公开接口，能起服务就一定回 200
+            health() {
+              sudo docker exec "$1" node -e \
+                "fetch('http://127.0.0.1:3000/api/config').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))" \
+                >/dev/null 2>&1
+            }
+
+            wait_healthy() {
+              i=0
+              while [ "$i" -lt 45 ]; do
+                health "$1" && return 0
+                i=$((i + 1)); sleep 1
+              done
+              return 1
+            }
+
+            echo "=== 预检：新镜像先起临时容器（不占对外端口） ==="
+            sudo docker rm -f "$PRECHECK" >/dev/null 2>&1 || true
+            sudo docker run -d --name "$PRECHECK" --env-file "$SITE_DIR/.env" "$IMAGE" >/dev/null
+            if ! wait_healthy "$PRECHECK"; then
+              echo "❌ 预检失败，旧容器未动。最近日志："
+              sudo docker logs --tail 60 "$PRECHECK" || true
+              sudo docker rm -f "$PRECHECK" >/dev/null 2>&1 || true
+              exit 1
+            fi
+            sudo docker rm -f "$PRECHECK" >/dev/null
+            echo "预检通过"
+
+            echo "=== 记录回滚镜像 ==="
+            CUR_ID=$(sudo docker inspect -f '{{.Image}}' "$CONTAINER" 2>/dev/null || true)
+            if [ -n "$CUR_ID" ]; then
+              sudo docker tag "$CUR_ID" jietingche:previous && echo "回滚镜像：jietingche:previous"
+            else
+              echo "无运行中的旧容器（首次部署）"
+            fi
+            sudo docker tag "$IMAGE" jietingche:latest
+
+            echo "=== 换容器 ==="
+            sudo docker stop "$CONTAINER" >/dev/null 2>&1 || true
+            sudo docker rm "$CONTAINER" >/dev/null 2>&1 || true
+            if ! run_container jietingche:latest; then
+              echo "❌ 新容器启动失败"
+              if sudo docker image inspect jietingche:previous >/dev/null 2>&1; then
+                echo "回滚到 jietingche:previous"
+                sudo docker rm -f "$CONTAINER" >/dev/null 2>&1 || true
+                run_container jietingche:previous || { echo "❌ 回滚也失败，需人工介入"; exit 1; }
+              fi
+              exit 1
+            fi
+
+            echo "=== 自检 ==="
+            if ! wait_healthy "$CONTAINER"; then
+              echo "❌ 新容器未通过探活，最近日志："
+              sudo docker logs --tail 60 "$CONTAINER" || true
+              echo "   回滚命令：sudo docker rm -f $CONTAINER && sudo docker run -d --name $CONTAINER ... jietingche:previous"
+              exit 1
+            fi
+
+            echo "=== 清理悬空镜像（保留 latest / previous 便于回滚） ==="
+            sudo docker image prune -f >/dev/null
+
+            echo "=== 部署完成 ==="
+            sudo docker ps | grep "$CONTAINER"
