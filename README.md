@@ -13,9 +13,15 @@ npm run dev     # http://localhost:3000
 npm run build   # 生产构建
 ```
 
-数据库：配了 `TURSO_DATABASE_URL`（+ `TURSO_AUTH_TOKEN`）走远程 libsql，
-否则落到本地 `data/app.db`（首次访问自动建表）。这两个值写在 `.env.local` 里（已 gitignore），
-所以本地开发也是直连线上那个 Turso 库，不再各自一份数据。
+数据库：**运行时读本地 SQLite 文件** `data/app.db`（首次访问自动建表）。
+
+为什么不用远程库：服务器在新加坡、Turso 免费版只能开在东京、访客在大陆，
+一次跨洋往返 70~90ms，而首页一轮要跑 14 次查询，光网络就 1 秒多；换成同机文件后单次查询 <1ms
+（数据量只有 10MB / 8.4k 车场 / 18.4k 套餐）。Turso 只保留两个用途：**数据中转**（`db:push` / `db:pull`）
+和**异地备份**。
+
+本地想临时直连线上库（只读排障、核对数据）：`JTC_DB=remote npm run dev`，
+凭证仍是 `.env.local` 里的 `TURSO_*`（已 gitignore）。`JTC_DB_FILE` 可以换库文件路径。
 
 **把本地库整库搬到 Turso**（幂等，重复跑只覆盖不重复）：
 
@@ -26,6 +32,15 @@ npm run db:push -- data/jtc.db
 
 脚本读 `.env.local` 里的凭证，按本地 `sqlite_master` 建表建索引，再按 200 行一批
 `INSERT OR REPLACE`，最后逐表对行数。
+
+**反过来：把 Turso 整库拉回本地**（本地库落后于线上时用，旧库自动备份成 `data/app.db.bak`）：
+
+```bash
+npm run db:pull              # 默认写 data/app.db
+```
+
+后台在线上改过的数据只落在 Turso，所以**任何「以线上为准」的场景都要先 pull、再上传服务器**。
+产物是单个自包含的 `.sqlite` 文件（跑完 VACUUM、不开 WAL），可以直接 scp。
 
 `data/app.db` 是业务库，`data/jtc.db` 是官方选品池原始库（`enrich-jtc` / `import-jtc` /
 `build-h5` 都依赖它），两者都不入库。`public/uploads/` 里的二维码图片同样不入库，
@@ -178,11 +193,15 @@ ADMIN_PASSWORD='换成一个强口令'
 ## 部署（GitHub Actions → 自己服务器）
 
 `.github/workflows/deploy.yml`：push main 自动跑「类型检查 + lint + 构建」→ 构建镜像推 GHCR →
-SSH 到服务器拉取换容器。服务器上只要有 Docker，数据全在 Turso，容器本身无状态。
+SSH 到服务器拉取换容器。服务器上只要有 Docker；业务库是宿主机上的 `data/app.db`，挂进容器 `/app/data`
+（`-v "$DATA_DIR:/app/data"`），换容器不丢。
 
 服务器上落在 1Panel 站点目录 `/opt/1panel/www/sites/jietingche.shenzjd.com`（可用 `DEPLOY_SITE_DIR` 改），
 所有运行时文件收在 `data/` 下，1Panel 备份站点时会一起带上：
 
+- `data/app.db`：**业务库（SQLite）**，容器读的就是这份。部署脚本会先校验「存在且 `car_parks` 非空」，
+  缺失或空库直接中止部署，避免上线一个空白站。目录和文件 owner 必须是 `1001`（容器以 `nextjs` 运行，
+  SQLite 要在同目录写 `-wal`/`-journal`）。
 - `data/.env`：`TURSO_DATABASE_URL` / `TURSO_AUTH_TOKEN` / `ADMIN_PASSWORD` / `ALLOWED_ORIGINS` / `JTC_SHARE_CODE`。
   首次部署若不存在，会用 GitHub secrets 自动生成（chmod 600，`ALLOWED_ORIGINS` 不配默认 `*`），
   之后以服务器上这份为准；想把 secret 的改动刷进服务器，手动跑一次 workflow 勾 `refresh_env=true`。
@@ -193,7 +212,19 @@ SSH 到服务器拉取换容器。服务器上只要有 Docker，数据全在 Tu
 `DEPLOY_SITE_DIR`、`APP_PORT`（默认 3000，线上用的是 6715）、`JTC_SHARE_CODE`。
 
 部署顺序是「拉镜像 → 临时容器预检 → 换容器 → 容器内探活」，任一步失败都保留旧容器/
-旧镜像（`jietingche:previous`）可回滚，不会出现停服又拉不起来的情况。
+旧镜像（`jietingche:previous`）可回滚，不会出现停服又拉不起来的情况。预检用的是业务库的
+**副本**（`mktemp -d` 里 cp 一份），不会和线上容器抢同一个 SQLite 文件的写锁。
+
+**业务库怎么更新到服务器**（改了数据/后台改过库之后）：
+
+```bash
+npm run db:pull                                                        # 1. 以线上为准拉一份
+scp data/app.db <user>@<host>:<SITE_DIR>/data/app.db                   # 2. 传上去
+ssh <user>@<host> 'sudo chown 1001:1001 <SITE_DIR>/data/app.db'        # 3. 容器以 1001 运行
+```
+
+传之前**先停容器**（`docker stop jietingche`）再传，避免运行中的进程还握着旧文件句柄；
+传完 `docker start jietingche`。直接 `scp` 覆盖正在使用的 SQLite 有触发 `database disk image is malformed` 的风险。
 
 ## 接口
 
