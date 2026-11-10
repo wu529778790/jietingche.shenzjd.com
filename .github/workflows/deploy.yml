@@ -32,6 +32,11 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+    inputs:
+      refresh_env:
+        description: 用 GitHub secrets 重写服务器上的 .env（默认只在文件不存在时生成）
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -132,12 +137,13 @@ jobs:
         env:
           DEPLOY_SITE_DIR: ${{ secrets.DEPLOY_SITE_DIR }}
           APP_PORT: ${{ secrets.APP_PORT }}
+          REFRESH_ENV: ${{ inputs.refresh_env || 'false' }}
         with:
           host: ${{ secrets.DEPLOY_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
           password: ${{ secrets.DEPLOY_PASSWORD }}
           port: ${{ secrets.DEPLOY_PORT || 22 }}
-          envs: DEPLOY_SITE_DIR,APP_PORT
+          envs: DEPLOY_SITE_DIR,APP_PORT,REFRESH_ENV
           command_timeout: 30m
           script: |
             set -eu
@@ -158,8 +164,8 @@ jobs:
             sudo mkdir -p "$SITE_DIR/uploads"
             # 容器里以 nextjs(1001) 运行，上传目录得让它可写
             sudo chown -R 1001:1001 "$SITE_DIR/uploads"
-            if ! sudo test -f "$SITE_DIR/.env"; then
-              echo "未找到 $SITE_DIR/.env，按 GitHub secrets 生成"
+            if ! sudo test -f "$SITE_DIR/.env" || [ "${REFRESH_ENV:-false}" = "true" ]; then
+              echo "生成 $SITE_DIR/.env（来自 GitHub secrets，refresh=${REFRESH_ENV:-false}）"
               {
                 echo "TURSO_DATABASE_URL=${{ secrets.TURSO_DATABASE_URL }}"
                 echo "TURSO_AUTH_TOKEN=${{ secrets.TURSO_AUTH_TOKEN }}"
@@ -170,8 +176,8 @@ jobs:
             fi
 
             echo "=== 环境自检：容器里的 DB 配置能不能通 ==="
-            # 只打 URL、token 长度和哈希前缀，不泄露 token 本身
-            sudo docker run --rm --env-file "$SITE_DIR/.env" "$IMAGE" node -e '
+            # 只打 URL、token 长度和哈希前缀，不泄露 token 本身；连不上直接失败，不浪费一次预检
+            if ! sudo docker run --rm --env-file "$SITE_DIR/.env" "$IMAGE" node -e '
               const c = require("crypto");
               const url = process.env.TURSO_DATABASE_URL || "";
               const token = process.env.TURSO_AUTH_TOKEN || "";
@@ -183,9 +189,18 @@ jobs:
                 headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" },
                 body: JSON.stringify({ requests: [{ type: "execute", stmt: { sql: "select 1" } }, { type: "close" }] }),
               })
-                .then(async (r) => console.log("PIPELINE", r.status, (await r.text()).slice(0, 160)))
-                .catch((e) => console.log("PIPELINE ERROR", e.message));
-            '
+                .then(async (r) => {
+                  console.log("PIPELINE", r.status, (await r.text()).slice(0, 160));
+                  if (r.status !== 200) process.exit(1);
+                })
+                .catch((e) => {
+                  console.log("PIPELINE ERROR", e.message);
+                  process.exit(1);
+                });
+            '; then
+              echo "❌ 数据库自检未通过：核对 TURSO_* secrets（或手动修 $SITE_DIR/.env 后带 refresh_env 重跑）"
+              exit 1
+            fi
 
             run_container() {
               sudo docker run -d \
