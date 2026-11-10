@@ -89,8 +89,6 @@ export default function HomePage() {
   const [filterOpen, setFilterOpen] = useState(false);
 
   const reqId = useRef(0);
-  /** 用户手动选过排序后，定位结果回来就不要偷偷改回“按距离” */
-  const sortTouched = useRef(false);
   /** 用户手动选过城市后，定位反查到的城市不要覆盖他的选择 */
   const cityTouched = useRef(false);
 
@@ -190,12 +188,11 @@ export default function HomePage() {
   }, []);
 
   const locate = useCallback(
-    (forceSort = false) => {
-      // 刚定位过就直接复用，既不弹权限也不让列表抖一下
-      const cached = forceSort ? null : readGeoCache();
+    (force = false) => {
+      // 刚定位过就直接复用，既不弹权限也不让列表抖一下；force 只用来跳过缓存
+      const cached = force ? null : readGeoCache();
       if (cached) {
         setCoords({ lat: cached.lat, lng: cached.lng });
-        if (!sortTouched.current) setSort("distance");
         if (cached.city && !cityTouched.current) {
           setCity(cached.city);
           setDistrict("");
@@ -216,7 +213,6 @@ export default function HomePage() {
           const next = { lat: pos.coords.latitude, lng: pos.coords.longitude };
           setCoords(next);
           writeGeoCache(next);
-          if (forceSort || !sortTouched.current) setSort("distance");
           setGeoState("idle");
           setGeoReady(true);
           void resolveCity(next);
@@ -282,8 +278,7 @@ export default function HomePage() {
     setType("");
     setSlot("");
     setMaxPrice(0);
-    sortTouched.current = false;
-    setSort(coords ? "distance" : "recommend");
+    setSort("recommend");
   }
 
   return (
@@ -367,10 +362,7 @@ export default function HomePage() {
             key={option.value}
             type="button"
             disabled={option.value === "distance" && !coords}
-            onClick={() => {
-              sortTouched.current = true;
-              setSort(option.value);
-            }}
+            onClick={() => setSort(option.value)}
             className={`filter-pill ${sort === option.value ? "is-active" : ""} disabled:cursor-not-allowed disabled:opacity-40`}
           >
             {option.label}

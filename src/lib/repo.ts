@@ -417,15 +417,29 @@ export async function searchPublic(input: SearchInput): Promise<SearchResult> {
     !input.city && !(input.sort === "distance" && hasGeo)
       ? `CASE WHEN c.city IN (${placeholders(FOCUS_CITIES.length)}) THEN 0 ELSE 1 END ASC`
       : "";
-  let orderSql = "MAX(k.commission) DESC, MIN(k.price) ASC";
+  /** 距离平方（度²）：纬度 1 度 ≈ 111.32km，只用来比较大小，不用开方 */
+  const dist2Sql = "MIN(((c.lat - ?) * (c.lat - ?)) + ((c.lng - ?) * (c.lng - ?)) * ?)";
+  const cosLat = Math.cos((lat * Math.PI) / 180) ** 2 || 1;
+  /** 公里 → 度²，给圈层阈值用 */
+  const deg2 = (km: number) => ((km / 111.32) ** 2).toFixed(10);
+
+  let orderSql = "MIN(k.price) ASC";
   if (input.sort === "distance" && hasGeo) {
-    orderSql = "MIN(((c.lat - ?) * (c.lat - ?)) + ((c.lng - ?) * (c.lng - ?)) * ?) ASC, MIN(k.price) ASC";
-    const cosLat = Math.cos((lat * Math.PI) / 180) ** 2;
-    orderArgs.push(lat, lat, lng, lng, cosLat || 1);
+    orderSql = `${dist2Sql} ASC, MIN(k.price) ASC`;
+    orderArgs.push(lat, lat, lng, lng, cosLat);
   } else if (input.sort === "price") {
     orderSql = "MIN(k.price) ASC";
   } else if (input.sort === "commission") {
     orderSql = "MAX(k.commission) DESC";
+  } else if (hasGeo) {
+    // 推荐 = 官方 sortMode=1 的本地版：先给走得到的（1/3/10km），同圈层内比价。
+    // 不按佣金排——佣金是商家侧指标，按它排会把远且贵的顶到首屏。
+    const tier =
+      `CASE WHEN ${dist2Sql} <= ${deg2(1)} THEN 0 ` +
+      `WHEN ${dist2Sql} <= ${deg2(3)} THEN 1 ` +
+      `WHEN ${dist2Sql} <= ${deg2(10)} THEN 2 ELSE 3 END`;
+    orderSql = `${tier} ASC, MIN(k.price) ASC`;
+    for (let i = 0; i < 3; i += 1) orderArgs.push(lat, lat, lng, lng, cosLat);
   }
 
   const finalOrder = [focusOrder, orderSql].filter(Boolean).join(", ");

@@ -58,7 +58,7 @@ node --no-warnings scripts/import-jtc.mjs --city 深圳市   # 只导一个城�
 （银川、西宁没有城市条目），同样迭代到第二轮无新增。
 
 前台优先级：`src/lib/types.ts` 的 `FOCUS_CITIES`（北上广深 + 省会/强二线）
-决定车场库默认排序与首页没选城市/没定位时的推荐顺序，
+决定车场库默认排序与首页**没定位**时的推荐顺序（有定位时按距离圈层排，见「接口」一节），
 `HOT_CITIES` 是首页那排快捷城市入口。
 
 导入做了什么：按 `park_code` 归并车场、`package_id` 派生稳定主键、佣金元→分、
@@ -155,12 +155,16 @@ SSH 到服务器拉取换容器。服务器上只要有 Docker，数据全在 Tu
 公开：
 
 - `GET /api/search?q=&city=&district=&industry=&type=&slot=&maxPrice=&sort=&lat=&lng=&page=`
+  - `sort=recommend`（默认）：有定位时按距离圈层（≤1km / ≤3km / ≤10km / 更远）排序，
+    同圈层内价格升序；**没有定位**时按 `FOCUS_CITIES` 城市热度 + 价格升序
+  - `sort=distance` 严格按距离、`sort=price` 按最低价、`sort=commission` 按最高佣金
+  - 佣金不参与默认排序：它是商家侧指标，按它排会把远且贵的顶到首屏
 - `GET /api/facets?city=` 筛选栏分面
 - `GET /api/locate?lat=&lng=` 定位反查城市（前端定位后自动选中）
-- `GET /api/config` 读兜底推广码
+- `GET /api/config` 读前端出码用的 `shareCode`
 
 需登录（后台）：
 
 - `GET/POST/PATCH/DELETE /api/parks`、`/api/packages`、`/api/logs`、`/api/stats`
-- `POST /api/upload` 上传专属码图片，`POST /api/config` 改兜底码
+- `POST /api/upload` 通用上传（码图已改成前端生成，这里目前没人调用）
 - `POST /api/admin/login`、`POST /api/admin/logout`
