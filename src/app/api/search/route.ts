@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { apiJson, preflight } from "@/lib/api";
 import { searchPublic } from "@/lib/repo";
 
 function strParam(url: URL, key: string): string {
@@ -33,11 +33,13 @@ export async function GET(req: Request) {
     page: numParam(url, "page"),
     pageSize: numParam(url, "pageSize"),
   });
-  return NextResponse.json({
-    ok: true,
-    data: result.parks,
-    total: result.total,
-    page: result.page,
-    pageSize: result.pageSize,
+  return apiJson("search", req, result.parks, {
+    limit: 240,
+    meta: { total: result.total, page: result.page, pageSize: result.pageSize },
+    headers: { "Cache-Control": "public, max-age=30, stale-while-revalidate=60" },
   });
+}
+
+export function OPTIONS(req: Request) {
+  return preflight(req);
 }

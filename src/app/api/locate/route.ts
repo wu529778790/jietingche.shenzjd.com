@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { apiError, apiJson, preflight } from "@/lib/api";
 import { nearestCity } from "@/lib/repo";
 
 /**
@@ -10,8 +10,15 @@ export async function GET(req: Request) {
   const lat = Number(url.searchParams.get("lat"));
   const lng = Number(url.searchParams.get("lng"));
   if (!Number.isFinite(lat) || !Number.isFinite(lng) || (lat === 0 && lng === 0)) {
-    return NextResponse.json({ ok: false, error: "缺少有效的经纬度" }, { status: 400 });
+    return apiError("locate", req, "缺少有效的经纬度", 400);
   }
   const city = await nearestCity(lat, lng);
-  return NextResponse.json({ ok: true, data: { city } });
+  return apiJson("locate", req, { city }, {
+    limit: 120,
+    headers: { "Cache-Control": "private, max-age=600" },
+  });
+}
+
+export function OPTIONS(req: Request) {
+  return preflight(req);
 }

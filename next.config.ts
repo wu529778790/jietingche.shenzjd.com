@@ -13,6 +13,13 @@ const nextConfig: NextConfig = {
       },
     },
   },
+  /**
+   * 对外接口固定走 /api/v1/*，内部实现随便改路径，端上不用跟着动。
+   * proxy 会把 /api/v1/xxx 归一成 /api/xxx 再判白名单。
+   */
+  async rewrites() {
+    return [{ source: "/api/v1/:path*", destination: "/api/:path*" }];
+  },
 };
 
 export default nextConfig;

@@ -13,8 +13,11 @@ const PUBLIC_API = new Set([
 function isPublic(pathname: string, method: string): boolean {
   if (pathname === "/admin/login") return true;
   if (!pathname.startsWith("/api/")) return false;
-  if (PUBLIC_API.has(pathname)) return true;
-  return pathname === "/api/config" && method === "GET";
+  // /api/v1/* 是给外部端（小工具、B 站 Toy）的稳定别名，等价于 /api/*（见 next.config rewrites）
+  const path = pathname.replace(/^\/api\/v1(?=\/|$)/, "/api");
+  if (PUBLIC_API.has(path)) return true;
+  if (path === "/api/config") return method === "GET" || method === "OPTIONS";
+  return false;
 }
 
 export async function proxy(req: NextRequest) {
