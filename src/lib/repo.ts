@@ -4,6 +4,7 @@ import { db, ensureSchema, newId, now, num, str } from "./db";
 import { toCarPark, toLog, toPackage, toSnapshot } from "./rows";
 import { CONFIG_KEYS } from "./schema";
 import {
+  DEFAULT_SHARE_CODE,
   FOCUS_CITIES,
   distanceMeters,
   type CarPark,
@@ -26,7 +27,6 @@ interface PackageFilter {
   type?: string;
   slot?: string;
   maxPrice?: number;
-  withQr?: boolean;
 }
 
 /** 把套餐条件拼成 SQL 片段，条件里的列名统一带 pk 前缀时用 alias */
@@ -47,7 +47,6 @@ function packageConds(filter: PackageFilter, alias = ""): { sql: string[]; args:
     sql.push(`${p}price > 0 AND ${p}price <= ?`);
     args.push(filter.maxPrice);
   }
-  if (filter.withQr) sql.push(`${p}qr_path <> ''`);
   return { sql, args };
 }
 
@@ -79,7 +78,8 @@ export interface ParkQuery {
   q?: string;
   page?: number;
   pageSize?: number;
-  withQr?: boolean;
+  /** 只看「生成不出直达码」的车场：缺 park_code，或套餐缺 source_package_id */
+  noCode?: boolean;
 }
 
 export async function listParks(
@@ -97,8 +97,10 @@ export async function listParks(
     );
     for (let i = 0; i < 6; i += 1) args.push(like(kw));
   }
-  if (query.withQr) {
-    conds.push("EXISTS (SELECT 1 FROM packages pk WHERE pk.park_id = car_parks.id AND pk.qr_path <> '')");
+  if (query.noCode) {
+    conds.push(
+      "(park_code = '' OR EXISTS (SELECT 1 FROM packages pk WHERE pk.park_id = car_parks.id AND pk.source_package_id = ''))",
+    );
   }
   const where = conds.length ? ` WHERE ${conds.join(" AND ")}` : "";
   // 车场库默认把北上广深/省会排前面（低购买力城市不用占首屏）
@@ -550,12 +552,15 @@ export async function setConfig(key: string, value: string): Promise<void> {
 }
 
 export interface PublicConfig {
-  promoQrPath: string;
+  /** 前端拼套餐直达链接、现场出码用的分佣码 */
+  shareCode: string;
 }
 
+/** 分佣码优先级：后台配置 > 环境变量 > 内置兜底值 */
 export async function getPublicConfig(): Promise<PublicConfig> {
   await ensureSchema();
-  return { promoQrPath: await readConfig(CONFIG_KEYS.promoQrPath) };
+  const fromDb = await readConfig(CONFIG_KEYS.shareCode);
+  return { shareCode: fromDb || (process.env.JTC_SHARE_CODE || "").trim() || DEFAULT_SHARE_CODE };
 }
 
 /* ------------------------------ 台账 ------------------------------ */

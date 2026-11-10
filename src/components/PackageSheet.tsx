@@ -1,13 +1,15 @@
 "use client";
 
+import { useMemo } from "react";
+import { packageQrDataUrl } from "@/lib/qr";
 import { formatDistance, yuan, type Package, type ParkWithPackages } from "@/lib/types";
 
 interface Props {
   park: ParkWithPackages;
   pkg: Package;
   onClose: () => void;
-  /** 套餐没配专属码时的兜底推广码 */
-  promoQrPath?: string;
+  /** 分佣码，用来拼套餐直达链接并在前端现场出码 */
+  shareCode?: string;
 }
 
 function navUrl(park: ParkWithPackages) {
@@ -16,8 +18,13 @@ function navUrl(park: ParkWithPackages) {
   return `https://uri.amap.com/marker?position=${park.lng},${park.lat}&name=${name}&src=web&coordinate=gaode`;
 }
 
-export default function PackageSheet({ park, pkg, onClose, promoQrPath = "" }: Props) {
-  const qr = pkg.qrPath || promoQrPath;
+export default function PackageSheet({ park, pkg, onClose, shareCode = "" }: Props) {
+  // 码全是前端现场生成的：套餐直达码 → 缺编码时退到搜索页
+  const qr = useMemo(
+    () => packageQrDataUrl(park.parkCode, pkg.sourcePackageId, shareCode),
+    [park.parkCode, pkg.sourcePackageId, shareCode],
+  );
+
   const facts = [
     pkg.typeLabel,
     pkg.period,
@@ -69,7 +76,7 @@ export default function PackageSheet({ park, pkg, onClose, promoQrPath = "" }: P
           </>
         ) : (
           <div className="mb-3 rounded-xl border border-dashed border-border p-6 text-center text-sm text-muted">
-            这个套餐的二维码还没配好，先联系推广员
+            二维码生成失败，刷新页面再试，或直接在小程序里搜「{park.name}」
           </div>
         )}
 

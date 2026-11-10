@@ -109,6 +109,12 @@ export interface ParkWithPackages extends CarPark {
   distance?: number | null;
 }
 
+/**
+ * 官方分佣 shareCode 兜底值：前端拼套餐直达链接时用。
+ * 优先取环境变量 JTC_SHARE_CODE，没配才用这枚（海报解码所得，2026-11-10）。
+ */
+export const DEFAULT_SHARE_CODE = "USC261110002056207ZEqLdE";
+
 /** 分 → 元，用于展示 */
 export function yuan(cent: number): string {
   return (cent / 100).toFixed(2).replace(/\.00$/, "");

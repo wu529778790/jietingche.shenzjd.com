@@ -1,9 +1,8 @@
 import { NextResponse } from "next/server";
 import { apiJson, preflight } from "@/lib/api";
-import { getPublicConfig, setConfig } from "@/lib/repo";
-import { CONFIG_KEYS } from "@/lib/schema";
+import { getPublicConfig } from "@/lib/repo";
 
-/** 站点配置：目前只有兜底推广码 */
+/** 站点配置：只下发前端出码用的分佣码，码图本身不落库 */
 export async function GET(req: Request) {
   const data = await getPublicConfig();
   return apiJson("config", req, data, {
@@ -12,14 +11,12 @@ export async function GET(req: Request) {
   });
 }
 
-/** 写配置需要后台鉴权（proxy 会拦），这里不加 CORS/限流 */
-export async function POST(req: Request) {
-  const body = await req.json().catch(() => null);
-  const promoQrPath = typeof body?.promoQrPath === "string" ? body.promoQrPath.trim() : "";
-  await setConfig(CONFIG_KEYS.promoQrPath, promoQrPath);
-  return NextResponse.json({ ok: true, data: { promoQrPath } });
-}
-
 export function OPTIONS(req: Request) {
   return preflight(req);
+}
+
+/** 保留 POST 语义：码图不再落库，暂无可写配置，直接回当前值避免前端 404 */
+export async function POST() {
+  const data = await getPublicConfig();
+  return NextResponse.json({ ok: true, data });
 }

@@ -114,8 +114,8 @@ export const COLUMN_MIGRATIONS: Record<string, [string, string][]> = {
   ],
 };
 
-/** 全局推广码等站点配置的键名 */
+/** 站点配置的键名（码图不落库，全部前端现场生成） */
 export const CONFIG_KEYS = {
-  /** 兜底推广二维码图片地址（套餐没配专属码时用它） */
-  promoQrPath: "promo_qr_path",
+  /** 分佣 shareCode：前端拼套餐直达链接用，后台可改 */
+  shareCode: "share_code",
 } as const;

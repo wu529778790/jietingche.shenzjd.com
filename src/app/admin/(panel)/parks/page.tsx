@@ -33,15 +33,12 @@ export default function ParksPage() {
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [keyword, setKeyword] = useState("");
-  const [onlyQr, setOnlyQr] = useState(false);
+  const [onlyMissing, setOnlyMissing] = useState(false);
   const [loading, setLoading] = useState(true);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState({ ...EMPTY_PARK });
   const [pkgFormParkId, setPkgFormParkId] = useState<string | null>(null);
   const [pkgForm, setPkgForm] = useState({ ...EMPTY_PKG });
-  const [uploadingId, setUploadingId] = useState<string | null>(null);
-  const [promoQrPath, setPromoQrPath] = useState("");
-  const [uploadingPromo, setUploadingPromo] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -51,7 +48,7 @@ export default function ParksPage() {
         pageSize: String(PAGE_SIZE),
       });
       if (keyword.trim()) params.set("q", keyword.trim());
-      if (onlyQr) params.set("withQr", "1");
+      if (onlyMissing) params.set("noCode", "1");
       const res = await adminFetch(`/api/parks?${params.toString()}`);
       const json = await res.json();
       setParks(json.data ?? []);
@@ -59,41 +56,12 @@ export default function ParksPage() {
     } finally {
       setLoading(false);
     }
-  }, [page, keyword, onlyQr]);
+  }, [page, keyword, onlyMissing]);
 
   useEffect(() => {
     const timer = setTimeout(load, 250);
     return () => clearTimeout(timer);
   }, [load]);
-
-  useEffect(() => {
-    adminFetch("/api/config")
-      .then((res) => res.json())
-      .then((json) => setPromoQrPath(json?.data?.promoQrPath ?? ""))
-      .catch(() => undefined);
-  }, []);
-
-  async function uploadPromoQr(file: File) {
-    setUploadingPromo(true);
-    try {
-      const data = new FormData();
-      data.append("file", file);
-      const upRes = await adminFetch("/api/upload", { method: "POST", body: data });
-      const upJson = await upRes.json();
-      if (!upJson.ok) throw new Error(upJson.error ?? "上传失败");
-      const res = await adminFetch("/api/config", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ promoQrPath: upJson.data.url }),
-      });
-      const json = await res.json();
-      setPromoQrPath(json?.data?.promoQrPath ?? upJson.data.url);
-    } catch (error) {
-      alert(error instanceof Error ? error.message : "上传失败");
-    } finally {
-      setUploadingPromo(false);
-    }
-  }
 
   function startNew() {
     setEditingId("new");
@@ -166,73 +134,18 @@ export default function ParksPage() {
     await load();
   }
 
-  async function uploadQr(packageId: string, file: File) {
-    setUploadingId(packageId);
-    try {
-      const data = new FormData();
-      data.append("file", file);
-      const upRes = await adminFetch("/api/upload", { method: "POST", body: data });
-      const upJson = await upRes.json();
-      if (!upJson.ok) throw new Error(upJson.error ?? "上传失败");
-      await adminFetch(`/api/packages/${packageId}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ qrPath: upJson.data.url }),
-      });
-      await load();
-    } catch (error) {
-      alert(error instanceof Error ? error.message : "上传失败");
-    } finally {
-      setUploadingId(null);
-    }
-  }
-
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between">
         <div>
           <div className="text-sm font-semibold">车场库</div>
           <div className="text-xs text-muted">
-            套餐配了专属码就发专属码，没配的发下面的兜底推广码
+            码全部由前台现场生成，不用传图；车场缺官方编码时会退到搜索页码
           </div>
         </div>
         <button className="btn-primary" onClick={startNew}>
           新增车场
         </button>
-      </div>
-
-      <div className="card flex items-center gap-2 p-3">
-        {promoQrPath ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            src={promoQrPath}
-            alt="兜底推广码"
-            className="h-16 w-16 shrink-0 rounded border border-border object-contain"
-          />
-        ) : (
-          <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded border border-dashed border-border text-[11px] text-muted">
-            未设置
-          </div>
-        )}
-        <div className="min-w-0 flex-1">
-          <div className="text-xs font-medium">兜底推广码</div>
-          <div className="mt-0.5 text-[11px] text-muted">
-            套餐没有专属码时，访客扫这张；建议放你自己的分销入口码
-          </div>
-        </div>
-        <label className="btn-ghost shrink-0 cursor-pointer px-2 py-1 text-xs">
-          {uploadingPromo ? "上传中…" : promoQrPath ? "换码" : "上传"}
-          <input
-            type="file"
-            accept="image/*"
-            className="hidden"
-            onChange={(e) => {
-              const file = e.target.files?.[0];
-              if (file) uploadPromoQr(file);
-              e.target.value = "";
-            }}
-          />
-        </label>
       </div>
 
       <div className="card space-y-2 p-3">
@@ -249,13 +162,13 @@ export default function ParksPage() {
           <label className="flex cursor-pointer items-center gap-1.5">
             <input
               type="checkbox"
-              checked={onlyQr}
+              checked={onlyMissing}
               onChange={(e) => {
-                setOnlyQr(e.target.checked);
+                setOnlyMissing(e.target.checked);
                 setPage(1);
               }}
             />
-            只看已配专属码
+            只看缺直达码
           </label>
           <span>共 {total} 个车场</span>
         </div>
@@ -369,7 +282,7 @@ export default function ParksPage() {
 
       {!loading && parks.length === 0 ? (
         <div className="card p-6 text-center text-sm text-muted">
-          {keyword || onlyQr ? "没搜到符合条件的车场，换个关键词试试" : "车场库还是空的"}
+          {keyword || onlyMissing ? "没搜到符合条件的车场，换个关键词试试" : "车场库还是空的"}
           <Link href="/" className="ml-1 text-brand">
             去找停车
           </Link>
@@ -409,16 +322,6 @@ export default function ParksPage() {
                 key={pkg.id}
                 className="flex items-center gap-2 rounded-lg border border-border px-2 py-1.5"
               >
-                {pkg.qrPath ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={pkg.qrPath}
-                    alt=""
-                    className="h-10 w-10 shrink-0 rounded border border-border object-contain"
-                  />
-                ) : (
-                  <div className="h-10 w-10 shrink-0 rounded border border-dashed border-border" />
-                )}
                 <div className="min-w-0 flex-1">
                   <div className="truncate text-xs font-medium">
                     {pkg.name}
@@ -427,22 +330,9 @@ export default function ParksPage() {
                   <div className="text-[11px] text-muted">
                     {pkg.price > 0 ? `¥${yuan(pkg.price)}` : "未填价格"}
                     {pkg.commission > 0 ? ` · 佣金 ¥${yuan(pkg.commission)}` : ""}
-                    {pkg.qrPath ? "" : " · 缺专属码"}
+                    {pkg.sourcePackageId ? "" : " · 缺官方套餐编码"}
                   </div>
                 </div>
-                <label className="btn-ghost cursor-pointer px-2 py-1 text-xs">
-                  {uploadingId === pkg.id ? "上传中…" : pkg.qrPath ? "换码" : "传码"}
-                  <input
-                    type="file"
-                    accept="image/*"
-                    className="hidden"
-                    onChange={(e) => {
-                      const file = e.target.files?.[0];
-                      if (file) uploadQr(pkg.id, file);
-                      e.target.value = "";
-                    }}
-                  />
-                </label>
                 <button
                   className="btn-ghost px-2 py-1 text-xs text-red-500"
                   onClick={() => removePackage(pkg.id)}

@@ -78,7 +78,8 @@ export default function HomePage() {
   const [geoReady, setGeoReady] = useState(false);
 
   const [facets, setFacets] = useState<Facets>(EMPTY_FACETS);
-  const [promoQrPath, setPromoQrPath] = useState("");
+  /** 分佣码：弹层里现场生成套餐直达码用 */
+  const [shareCode, setShareCode] = useState("");
 
   const [parks, setParks] = useState<ParkWithPackages[]>([]);
   const [total, setTotal] = useState(0);
@@ -97,7 +98,7 @@ export default function HomePage() {
   useEffect(() => {
     fetch("/api/config")
       .then((res) => res.json())
-      .then((json) => setPromoQrPath(json?.data?.promoQrPath ?? ""))
+      .then((json) => setShareCode(json?.data?.shareCode ?? ""))
       .catch(() => undefined);
   }, []);
 
@@ -492,7 +493,7 @@ export default function HomePage() {
         <PackageSheet
           park={active.park}
           pkg={active.pkg}
-          promoQrPath={promoQrPath}
+          shareCode={shareCode}
           onClose={() => setActive(null)}
         />
       ) : null}
