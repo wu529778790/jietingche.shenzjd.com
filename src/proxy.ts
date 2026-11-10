@@ -1,8 +1,14 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { ADMIN_COOKIE, isValidAdminToken } from "@/lib/adminAuth";
 
-/** 访客只需要这三个：搜索、筛选分面、读兜底推广码 */
-const PUBLIC_API = new Set(["/api/search", "/api/facets", "/api/admin/login", "/api/admin/logout"]);
+/** 访客只需要这几个：搜索、筛选分面、定位反查城市、读兜底推广码 */
+const PUBLIC_API = new Set([
+  "/api/search",
+  "/api/facets",
+  "/api/locate",
+  "/api/admin/login",
+  "/api/admin/logout",
+]);
 
 function isPublic(pathname: string, method: string): boolean {
   if (pathname === "/admin/login") return true;
@@ -11,7 +17,7 @@ function isPublic(pathname: string, method: string): boolean {
   return pathname === "/api/config" && method === "GET";
 }
 
-export async function middleware(req: NextRequest) {
+export async function proxy(req: NextRequest) {
   const { pathname } = req.nextUrl;
   if (isPublic(pathname, req.method)) return NextResponse.next();
 
@@ -41,6 +47,4 @@ export async function middleware(req: NextRequest) {
 
 export const config = {
   matcher: ["/admin/:path*", "/api/:path*"],
-  // 用 Node 运行时，ADMIN_PASSWORD 可以在容器启动时注入，不必在构建期写死
-  runtime: "nodejs",
 };

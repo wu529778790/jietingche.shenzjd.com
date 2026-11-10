@@ -1,5 +1,5 @@
 /**
- * 管理端口令鉴权（Edge middleware 与 Node 路由都能用，只依赖 Web Crypto）
+ * 管理端口令鉴权（Proxy 与 Node 路由都能用，只依赖 Web Crypto）
  * 口令来自环境变量 ADMIN_PASSWORD；生产环境未配置时后台一律不可用。
  */
 export const ADMIN_COOKIE = "jtc_admin";
