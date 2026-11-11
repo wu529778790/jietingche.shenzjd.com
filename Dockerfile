@@ -15,6 +15,14 @@ RUN mkdir -p public
 ENV NEXT_TELEMETRY_DISABLED=1
 RUN npm run build
 
+# 把依赖从 standalone 里拆出去，供 runner 阶段单独 COPY 成一层。
+# 动机：跨境上行实测只有 ~30KB/s，node_modules 48MB 却和每次都会变的
+# .next（4MB）挤在同一层，导致改一行代码也要重传 20MB（约 11 分钟）。
+# 拆开后依赖层基本恒定，每次只推 .next 那几 MB（约 2 分钟）。
+# 顺带清掉可能被 file tracing 带进来的 data/app.db（运行时由挂卷覆盖，进镜像纯属浪费）。
+RUN mv /app/.next/standalone/node_modules /app/standalone-node_modules \
+ && rm -rf /app/.next/standalone/data
+
 FROM node:24-alpine AS runner
 WORKDIR /app
 ENV NODE_ENV=production \
@@ -25,6 +33,9 @@ ENV NODE_ENV=production \
 RUN addgroup -g 1001 -S nodejs && adduser -S nextjs -u 1001
 
 COPY --from=builder --chown=nextjs:nodejs /app/public ./public
+# 先放依赖层（稳定），再放业务代码层（每次都变）；顺序不能反，
+# 否则依赖会被上层覆盖进「每次变」的那一层，拆层就白做了。
+COPY --from=builder --chown=nextjs:nodejs /app/standalone-node_modules ./node_modules
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 
