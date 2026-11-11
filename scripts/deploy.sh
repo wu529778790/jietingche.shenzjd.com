@@ -74,6 +74,41 @@ cp -R .next/static/. "$STAGE/.next/static/"
 # 构建期 file tracing 会把本地业务库带进 standalone；运行时由挂卷覆盖，
 # 传上去纯属浪费（10MB），而且会让每次同步都因为内容变化而失效。
 rm -rf "$STAGE/data"
+
+# ---- 跨平台原生模块 ----
+# 产物是在 Mac 上构建的，node_modules 里只有 darwin 版原生二进制；容器是 alpine
+# (x64/musl)，运行时需要对应的 linux 版，否则启动即 MODULE_NOT_FOUND
+# （第一个报的是 @libsql/linux-x64-musl，后面还有 sharp）。
+# 这里两件事：丢掉 darwin 包（白占 26MB 传输），补上容器真正要的 linux 包。
+ensure_native() {
+  local name="$1" ver="$2" tmp
+  [ -n "$ver" ] || return 0
+  [ -d "$STAGE/node_modules/$name" ] && return 0
+  tmp=$(mktemp -d)
+  if npm pack "$name@$ver" --pack-destination "$tmp" >/dev/null 2>&1; then
+    tar -xzf "$tmp"/*.tgz -C "$tmp"
+    mkdir -p "$(dirname "$STAGE/node_modules/$name")"
+    cp -R "$tmp/package" "$STAGE/node_modules/$name"
+    echo "    补齐 $name@$ver"
+  else
+    echo "⚠️ 取不到 $name@$ver，容器里可能缺原生模块"
+  fi
+  rm -rf "$tmp"
+}
+
+echo "==> 对齐原生模块平台（darwin → linux-x64-musl / glibc）"
+find "$STAGE/node_modules" -maxdepth 2 -type d -name "*darwin*" -exec rm -rf {} + 2>/dev/null || true
+
+LIBSQL_VER=$(node -p "require('./node_modules/libsql/package.json').version" 2>/dev/null || true)
+ensure_native "@libsql/linux-x64-musl" "$LIBSQL_VER"
+
+if [ -d node_modules/sharp ]; then
+  ensure_native "@img/sharp-linux-x64" "$(node -p "require('./node_modules/sharp/package.json').version" 2>/dev/null || true)"
+  # libvips 的包版本跟 sharp 不同步，从本地 darwin 包读，保证两边匹配
+  VIPS_VER=$(node -p "require('./node_modules/@img/sharp-libvips-darwin-arm64/package.json').version" 2>/dev/null || true)
+  ensure_native "@img/sharp-libvips-linux-x64" "$VIPS_VER"
+fi
+
 cp Dockerfile.deploy "$STAGE/Dockerfile"
 cp scripts/remote-deploy.sh "$STAGE/remote-deploy.sh"
 echo "    产物 $(du -sh "$STAGE" | cut -f1)，其中 node_modules 基本不变，每次只有 .next 会变"
