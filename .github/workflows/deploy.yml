@@ -1,12 +1,17 @@
 name: Build & Deploy
 
-# 单链路：校验 → 构建镜像 → 服务器拉取换容器。
+# 单链路：校验 → 构建镜像 → 镜像送进服务器 → 换容器。
 #
-# 为什么是「CI 构建镜像 + 服务器 pull」而不是「传源码上去本机 build」：
+# 为什么是「CI 构建镜像」而不是「传源码上去本机 build」：
 #   - 这台应用带 Next + Tailwind 整套构建，服务器本机 build 会吃满 CPU/内存，
-#     而镜像构建放在 CI 上跑不影响线上；服务器只做 pull + run。
-#   - 镜像拉不动是真踩过的坑（GHCR 跨境），所以这里保留 30 分钟超时、
-#     并且「拉不到就退出，旧容器不动」。
+#     而镜像构建放在 CI 上跑不影响线上；服务器只做 load + run。
+#
+# 为什么镜像走「CI 直传（save → rsync → load）」而不是「服务器 pull GHCR」：
+#   - 广州服务器直连 ghcr.io 会被跨境网络掐断，大层反复重试拉不完（真踩过）。
+#     registry-mirrors 只对 docker.io 生效救不了 GHCR；镜像包私有，公共加速源
+#     也代理不了。
+#   - 所以默认把镜像 save + gzip 后 rsync 到服务器 /var/tmp，docker load 进来；
+#     传不动时服务器回退 GHCR 直拉。任一环节失败都直接退出，旧容器不动。
 #
 # 数据库在 Turso（远程 libsql），容器无状态：
 #   - 容器里不落任何业务数据，需要持久化的只有 data/uploads，挂到 /app/public/uploads。
@@ -27,7 +32,8 @@ name: Build & Deploy
 #   TURSO_AUTH_TOKEN     数据库 token
 #   ADMIN_PASSWORD       管理后台口令（不配，线上后台会 503）
 #
-# 服务器上只需要：Docker、能访问 ghcr.io、以及一个能写的站点目录。
+# 服务器上只需要：Docker、rsync、能写的 /var/tmp 与站点目录；
+# 想保留 GHCR 直拉兜底的话，还需要服务器偶尔能连上 ghcr.io（连不上不影响主链路）。
 
 on:
   push:
@@ -120,7 +126,7 @@ jobs:
     steps:
       - name: 检查必需 secret
         run: |
-          for name in DEPLOY_HOST DEPLOY_USER TURSO_DATABASE_URL TURSO_AUTH_TOKEN; do
+          for name in DEPLOY_HOST DEPLOY_USER DEPLOY_PASSWORD TURSO_DATABASE_URL TURSO_AUTH_TOKEN; do
             eval "value=\${$name}"
             if [ -z "$value" ]; then
               echo "::error::缺少 secret $name"
@@ -131,8 +137,45 @@ jobs:
         env:
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
           DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          # 镜像直传用 sshpass，密码缺了会先白等三次失败重试，这里提前拦
+          DEPLOY_PASSWORD: ${{ secrets.DEPLOY_PASSWORD }}
           TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
           TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+
+      # runner 在境外，从 GHCR 拉刚构建的镜像很快；真正跨不动的跨境段改走
+      # SSH 直传。这一步失败不拦部署：服务器脚本会回退 GHCR 直拉。
+      - name: 导出镜像（pull + save + gzip）
+        run: |
+          IMAGE="ghcr.io/$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]'):latest"
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+          docker pull "$IMAGE"
+          docker save "$IMAGE" | gzip -1 > /tmp/jietingche-image.tar.gz
+          du -h /tmp/jietingche-image.tar.gz
+          docker logout ghcr.io
+
+      - name: 镜像直传服务器（rsync 断点续传 ×3）
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_PASSWORD: ${{ secrets.DEPLOY_PASSWORD }}
+          DEPLOY_PORT: ${{ secrets.DEPLOY_PORT || '22' }}
+        run: |
+          sudo apt-get -qq update >/dev/null && sudo apt-get -qq install -y sshpass >/dev/null
+          ok=""
+          for i in 1 2 3; do
+            echo "--- 第 $i 次传输"
+            if sshpass -p "$DEPLOY_PASSWORD" rsync --partial --append-verify \
+              -e "ssh -p ${DEPLOY_PORT} -o StrictHostKeyChecking=accept-new" \
+              /tmp/jietingche-image.tar.gz \
+              "$DEPLOY_USER@$DEPLOY_HOST:/var/tmp/jietingche-image.tar.gz"; then
+              ok=1
+              break
+            fi
+            sleep 10
+          done
+          if [ -z "$ok" ]; then
+            echo "::warning::镜像直传失败，服务器将回退 GHCR 直拉"
+          fi
 
       - name: SSH 部署
         uses: appleboy/ssh-action@v1
@@ -160,12 +203,29 @@ jobs:
             APP_PORT="${APP_PORT:-3000}"
             PRECHECK="${CONTAINER}-precheck"
 
-            echo "=== 登录 GHCR 并拉取镜像 ==="
-            # login 不带 sudo 会把凭据写进 SSH 用户的 ~/.docker，sudo pull 读的是 /root/.docker
-            echo "${{ secrets.GITHUB_TOKEN }}" | sudo docker login ghcr.io -u ${{ github.actor }} --password-stdin
-            sudo docker pull "$IMAGE"
-            # 拉完立刻登出：留着这个 job 级 token 会让之后所有 pull 被打成 denied
-            sudo docker logout ghcr.io || true
+            # 镜像获取：CI 直传的包优先（load 即用，不走跨境 registry），没有
+            # 或加载失败再回退 GHCR 直拉——跨境能不能拉完看运气，所以只做兜底。
+            TRANSFERRED="/var/tmp/jietingche-image.tar.gz"
+            pull_from_ghcr() {
+              # login 不带 sudo 会把凭据写进 SSH 用户的 ~/.docker，sudo pull 读的是 /root/.docker
+              echo "${{ secrets.GITHUB_TOKEN }}" | sudo docker login ghcr.io -u ${{ github.actor }} --password-stdin
+              sudo docker pull "$IMAGE"
+              # 拉完立刻登出：留着这个 job 级 token 会让之后所有 pull 被打成 denied
+              sudo docker logout ghcr.io || true
+            }
+            if sudo test -s "$TRANSFERRED"; then
+              echo "=== 加载 CI 直传的镜像 ==="
+              if sudo docker load -i "$TRANSFERRED"; then
+                sudo rm -f "$TRANSFERRED"
+              else
+                echo "镜像包加载失败（传输损坏？），回退 GHCR 直拉"
+                sudo rm -f "$TRANSFERRED"
+                pull_from_ghcr
+              fi
+            else
+              echo "=== 无直传镜像包，回退 GHCR 直拉 ==="
+              pull_from_ghcr
+            fi
 
             echo "=== 准备数据目录 $DATA_DIR ==="
             sudo mkdir -p "$UPLOADS_DIR"
