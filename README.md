@@ -217,9 +217,17 @@ ADMIN_PASSWORD='换成一个强口令'
 
 镜像中转（不配就等于每次跨境直拉，很慢）：
 `REGISTRY_IMAGE`（完整仓库路径，不含 tag，全小写，例如
-`registry.cn-guangzhou.aliyuncs.com/jietingche/app`）、`REGISTRY_USERNAME`、`REGISTRY_PASSWORD`。
-阿里云 ACR 个人版免费：开通后建命名空间 → 建私有仓库 → 在「访问凭证」里设固定密码，
-用户名是阿里云账号全名。腾讯云 TCR 同理（用户名是云 API 密钥 ID）。
+`ccr.ccs.tencentyun.com/jietingche/app`）、`REGISTRY_USERNAME`、`REGISTRY_PASSWORD`。
+个人版都免费：
+
+- **腾讯云 TCR 个人版**：大陆仅广州地域，共享域名 `ccr.ccs.tencentyun.com`（没有专属域名）。
+  登录用户名是**账号 ID（UIN，一串数字）**，密码是实例卡片上「初始化密码」设的**固定密码**
+  （不是 API SecretKey，也不是 1 小时临时密码）。镜像仓库不用手建，第一次 push 自动创建；
+  命名空间名称在个人版里**全局唯一**，被占用就换个后缀。
+- **阿里云 ACR 个人版**：命名空间 → 私有仓库 → 「访问凭证」设固定密码，用户名是阿里云账号全名。
+
+两家公网拉取都会产生少量流量费（按 GB 计，一天几次几分钱）；服务器若本身在该云的同地域，
+可走内网免流量。
 
 部署顺序是「拉镜像 → 临时容器预检 → 换容器 → 容器内探活」，任一步失败都保留旧容器/
 旧镜像（`jietingche:previous`）可回滚，不会出现停服又拉不起来的情况。预检用的是业务库的
