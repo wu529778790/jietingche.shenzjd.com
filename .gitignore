@@ -54,3 +54,7 @@ next-env.d.ts
 # H5 构建产物（由 scripts/build-h5.mjs 从 minitool/src + 快照/本地库 生成）
 /minitool/dist/
 /platforms/toy/dist/
+
+# 本地发版配置（含服务器密码，绝不能入库）
+/.env.deploy
+/.deploy-stage/

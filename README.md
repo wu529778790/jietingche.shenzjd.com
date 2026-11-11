@@ -190,15 +190,41 @@ ADMIN_PASSWORD='换成一个强口令'
 `src/lib/adminTypes.ts` 放台账/对账类型，`src/lib/rows.ts` 放 libsql `Row` → 业务对象的映射（仅服务端）。
 `PackageSheet` 只保留访客出码逻辑，原先混在里面的话术、记台账等推广员功能已删除。
 
-## 部署（GitHub Actions → 自己服务器）
+## 部署（本机一条命令）
 
-`.github/workflows/deploy.yml`：push main 自动跑「类型检查 + lint + 构建」→ 构建镜像同时推 GHCR 与
-境内中转 registry → SSH 到服务器从**中转**拉取换容器。服务器上只要有 Docker；业务库是宿主机上的
-`data/app.db`，挂进容器 `/app/data`（`-v "$DATA_DIR:/app/data"`），换容器不丢。
+```bash
+npm run deploy
+```
 
-镜像必须经境内中转：广州服务器直连 `ghcr.io` 会被跨境网络掐断（实测 32 分钟拉不完），
-`CI save + rsync 直传` 也不行（跨境上行不到 1 Mbps，80 MB 传 17 分钟）。所以走「CI 双推 →
-服务器境内拉」，没配中转时脚本会告警并回退 GHCR 直拉。
+流程：Mac 上 `next build` → `rsync` 增量同步产物到服务器 → 服务器本地组镜像 → 预检 → 换容器。
+
+**为什么不用 GitHub Actions 部署**（每条都是实测过的）：
+
+| 方案 | 实测结果 |
+|---|---|
+| 服务器直连 GHCR 拉镜像 | 32 分钟拉不完，失败 |
+| CI `docker save` + rsync 直传 | 跨境上行 <1 Mbps，80 MB 传 17 分钟未完成 |
+| CI 推腾讯云 TCR 中转 | 上行约 30 KB/s，80 MB 要 45 分钟 |
+| CI 拆层后再推 | 19 MB 仍要 15 分钟以上 |
+
+瓶颈从来不是 registry，而是 **GitHub runner 出海的管道只有 30 KB/s**。而 Mac 和服务器都在
+国内，同一份产物（首次 16 MB 打包量，之后每次只有 `.next` 的几 MB）几秒钟就同步完。
+
+`.github/workflows/deploy.yml` 因此只保留「类型检查 + lint + 构建」的校验，不再部署。
+
+配置放 `.env.deploy`（已 gitignore，含服务器密码）：
+
+```bash
+DEPLOY_HOST=1.2.3.4
+DEPLOY_USER=root
+DEPLOY_PASSWORD=xxx     # 本机需要 sshpass（brew install sshpass）
+DEPLOY_PORT=22          # 可选
+DEPLOY_SITE_DIR=/opt/1panel/www/sites/jietingche.shenzjd.com   # 可选
+APP_PORT=6715           # 可选
+```
+
+常用开关：`npm run deploy -- --skip-build`（用现有 `.next` 产物，只同步+部署）、
+`npm run deploy -- --skip-sync`（产物没变，只重跑服务器端构建与切换）。
 
 服务器上落在 1Panel 站点目录 `/opt/1panel/www/sites/jietingche.shenzjd.com`（可用 `DEPLOY_SITE_DIR` 改），
 所有运行时文件收在 `data/` 下，1Panel 备份站点时会一起带上：
@@ -207,31 +233,17 @@ ADMIN_PASSWORD='换成一个强口令'
   缺失或空库直接中止部署，避免上线一个空白站。目录和文件 owner 必须是 `1001`（容器以 `nextjs` 运行，
   SQLite 要在同目录写 `-wal`/`-journal`）。
 - `data/.env`：`TURSO_DATABASE_URL` / `TURSO_AUTH_TOKEN` / `ADMIN_PASSWORD` / `ALLOWED_ORIGINS` / `JTC_SHARE_CODE`。
-  首次部署若不存在，会用 GitHub secrets 自动生成（chmod 600，`ALLOWED_ORIGINS` 不配默认 `*`），
-  之后以服务器上这份为准；想把 secret 的改动刷进服务器，手动跑一次 workflow 勾 `refresh_env=true`。
+  chmod 600，`ALLOWED_ORIGINS` 不配默认 `*`。**新机器需要手动放一份**（本地发版脚本不会生成它，
+  缺文件会直接中止部署）。
 - `data/uploads/`：挂到容器 `/app/public/uploads`，换容器不丢（码图已改成前端生成，这里是通用上传位）。
 
-仓库 Settings → Secrets 需要配：`DEPLOY_HOST`、`DEPLOY_USER`、`DEPLOY_PASSWORD`、
-`TURSO_DATABASE_URL`、`TURSO_AUTH_TOKEN`、`ADMIN_PASSWORD`，可选 `DEPLOY_PORT`（默认 22）、
-`DEPLOY_SITE_DIR`、`APP_PORT`（默认 3000，线上用的是 6715）、`JTC_SHARE_CODE`。
-
-镜像中转（不配就等于每次跨境直拉，很慢）：
-`REGISTRY_IMAGE`（完整仓库路径，不含 tag，全小写，例如
-`ccr.ccs.tencentyun.com/jietingche/app`）、`REGISTRY_USERNAME`、`REGISTRY_PASSWORD`。
-个人版都免费：
-
-- **腾讯云 TCR 个人版**：大陆仅广州地域，共享域名 `ccr.ccs.tencentyun.com`（没有专属域名）。
-  登录用户名是**账号 ID（UIN，一串数字）**，密码是实例卡片上「初始化密码」设的**固定密码**
-  （不是 API SecretKey，也不是 1 小时临时密码）。镜像仓库不用手建，第一次 push 自动创建；
-  命名空间名称在个人版里**全局唯一**，被占用就换个后缀。
-- **阿里云 ACR 个人版**：命名空间 → 私有仓库 → 「访问凭证」设固定密码，用户名是阿里云账号全名。
-
-两家公网拉取都会产生少量流量费（按 GB 计，一天几次几分钱）；服务器若本身在该云的同地域，
-可走内网免流量。
-
-部署顺序是「拉镜像 → 临时容器预检 → 换容器 → 容器内探活」，任一步失败都保留旧容器/
-旧镜像（`jietingche:previous`）可回滚，不会出现停服又拉不起来的情况。预检用的是业务库的
+部署顺序是「服务器本地组镜像 → 临时容器预检 → 换容器 → 容器内探活 → 缓存头断言」，任一步失败都
+保留旧容器/旧镜像（`jietingche:previous`）可回滚，不会出现停服又拉不起来的情况。预检用的是业务库的
 **副本**（`mktemp -d` 里 cp 一份），不会和线上容器抢同一个 SQLite 文件的写锁。
+
+产物同步用 `rsync -az --delete` 到 `<SITE_DIR>/release/`：`node_modules` 基本不变会被跳过，
+每次实际只传 `.next` 那几 MB。`data/app.db` 不会被带上去（构建期 file tracing 带进来的副本会先删掉），
+业务库只认服务器上的 `data/app.db`。
 
 **业务库怎么更新到服务器**（改了数据/后台改过库之后）：
 
