@@ -1,17 +1,19 @@
 name: Build & Deploy
 
-# 单链路：校验 → 构建镜像 → 镜像送进服务器 → 换容器。
+# 单链路：校验 → 构建镜像（GHCR + 境内中转双推）→ 服务器拉取 → 换容器。
 #
 # 为什么是「CI 构建镜像」而不是「传源码上去本机 build」：
 #   - 这台应用带 Next + Tailwind 整套构建，服务器本机 build 会吃满 CPU/内存，
-#     而镜像构建放在 CI 上跑不影响线上；服务器只做 load + run。
+#     而镜像构建放在 CI 上跑不影响线上；服务器只做 pull + run。
 #
-# 为什么镜像走「CI 直传（save → rsync → load）」而不是「服务器 pull GHCR」：
-#   - 广州服务器直连 ghcr.io 会被跨境网络掐断，大层反复重试拉不完（真踩过）。
+# 为什么镜像要经「境内中转 registry」：
+#   - 广州服务器直连 ghcr.io 会被跨境网络掐断，大层反复重试拉不完（真踩过 32min）。
 #     registry-mirrors 只对 docker.io 生效救不了 GHCR；镜像包私有，公共加速源
 #     也代理不了。
-#   - 所以默认把镜像 save + gzip 后 rsync 到服务器 /var/tmp，docker load 进来；
-#     传不动时服务器回退 GHCR 直拉。任一环节失败都直接退出，旧容器不动。
+#   - 也试过「CI save + rsync 直传」（境外 runner → 广州），实测跨境上行不到
+#     1 Mbps，80 MB 的包 17 分钟传不完，同样不能用。
+#   - 所以改成 CI 双推：GHCR 保底 + 境内 registry（阿里云 ACR / 腾讯云 TCR）做
+#     主通道。服务器从境内拉 80 MB 是秒级，只有中转没配或拉失败才回退 GHCR。
 #
 # 数据库在 Turso（远程 libsql），容器无状态：
 #   - 容器里不落任何业务数据，需要持久化的只有 data/uploads，挂到 /app/public/uploads。
@@ -32,8 +34,16 @@ name: Build & Deploy
 #   TURSO_AUTH_TOKEN     数据库 token
 #   ADMIN_PASSWORD       管理后台口令（不配，线上后台会 503）
 #
-# 服务器上只需要：Docker、rsync、能写的 /var/tmp 与站点目录；
-# 想保留 GHCR 直拉兜底的话，还需要服务器偶尔能连上 ghcr.io（连不上不影响主链路）。
+# 镜像中转（强烈建议配，不配就退回跨境直拉 GHCR，一次几十分钟）：
+#   REGISTRY_IMAGE       中转仓库完整路径，不含 tag。例：
+#                          registry.cn-guangzhou.aliyuncs.com/jietingche/app   （阿里云 ACR）
+#                          xxx.tencentcloudcr.com/jietingche/app                （腾讯云 TCR）
+#   REGISTRY_USERNAME    中转仓库用户名（ACR 是「阿里云账号全名」，TCR 是云 API 密钥 ID）
+#   REGISTRY_PASSWORD    中转仓库密码/token
+#   注意仓库名必须全小写，且提前在控制台建好命名空间与仓库（ACR 个人版免费）。
+#
+# 服务器上只需要：Docker、能访问中转 registry、一个能写的站点目录；
+# 只有中转不可用时才会用到 ghcr.io。
 
 on:
   push:
@@ -90,11 +100,28 @@ jobs:
     permissions:
       contents: read
       packages: write
+    # secrets 不能出现在 step 的 if 里，先落到 job 级 env 才能判断「中转配没配」
+    env:
+      REGISTRY_IMAGE: ${{ secrets.REGISTRY_IMAGE }}
     steps:
       - uses: actions/checkout@v5
 
-      - name: 镜像名
-        run: echo "IMAGE_NAME=ghcr.io/$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_ENV"
+      # 用 step outputs 而不是 GITHUB_ENV：中转 host 要拿来做后续 step 的 if 条件，
+      # GITHUB_ENV 写的变量在 env 上下文里不保证可见，outputs 是确定的。
+      - name: 计算镜像名
+        id: img
+        run: |
+          GHCR="ghcr.io/$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')"
+          HOST=""
+          if [ -n "$REGISTRY_IMAGE" ]; then
+            HOST="${REGISTRY_IMAGE%%/*}"
+            echo "镜像：$GHCR + 中转 $REGISTRY_IMAGE"
+          else
+            echo "::warning::未配置 REGISTRY_IMAGE，服务器只能跨境直拉 GHCR（每次可能几十分钟）"
+            echo "镜像：$GHCR（无中转）"
+          fi
+          echo "ghcr=$GHCR" >> "$GITHUB_OUTPUT"
+          echo "registry_host=$HOST" >> "$GITHUB_OUTPUT"
 
       - uses: docker/setup-buildx-action@v4
 
@@ -105,16 +132,38 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: 构建并推送
+      - name: 登录境内中转
+        if: steps.img.outputs.registry_host != ''
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ steps.img.outputs.registry_host }}
+          username: ${{ secrets.REGISTRY_USERNAME }}
+          password: ${{ secrets.REGISTRY_PASSWORD }}
+
+      - name: 构建并推送 GHCR（保底）
         uses: docker/build-push-action@v7
         with:
           context: .
           push: true
           tags: |
-            ${{ env.IMAGE_NAME }}:latest
-            ${{ env.IMAGE_NAME }}:${{ github.sha }}
+            ${{ steps.img.outputs.ghcr }}:latest
+            ${{ steps.img.outputs.ghcr }}:${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      # 中转失败不能拖垮部署：服务器按 sha 拉，拉不到就自动回退 GHCR。
+      # 也正因为服务器认 sha 而不是 latest，中转推失败时绝不会误拉上一次的旧镜像。
+      - name: 同步推送到境内中转
+        if: steps.img.outputs.registry_host != ''
+        continue-on-error: true
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ env.REGISTRY_IMAGE }}:latest
+            ${{ env.REGISTRY_IMAGE }}:${{ github.sha }}
+          cache-from: type=gha
 
   deploy:
     name: 部署到服务器
@@ -123,6 +172,8 @@ jobs:
     permissions:
       contents: read
       packages: read
+    env:
+      REGISTRY_IMAGE: ${{ secrets.REGISTRY_IMAGE }}
     steps:
       - name: 检查必需 secret
         run: |
@@ -133,49 +184,25 @@ jobs:
               exit 1
             fi
           done
+          # 中转只配一半会表现成「拉取 401」，不如在这里直接拦下来
+          if [ -n "${REGISTRY_IMAGE:-}" ]; then
+            if [ -z "${REGISTRY_USERNAME:-}" ] || [ -z "${REGISTRY_PASSWORD:-}" ]; then
+              echo "::error::REGISTRY_IMAGE 已配置，但缺少 REGISTRY_USERNAME / REGISTRY_PASSWORD"
+              exit 1
+            fi
+            echo "镜像中转：$REGISTRY_IMAGE"
+          else
+            echo "::warning::未配置镜像中转，本次只能跨境直拉 GHCR"
+          fi
           echo "必需 secret 已配置"
         env:
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
           DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
-          # 镜像直传用 sshpass，密码缺了会先白等三次失败重试，这里提前拦
           DEPLOY_PASSWORD: ${{ secrets.DEPLOY_PASSWORD }}
           TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
           TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
-
-      # runner 在境外，从 GHCR 拉刚构建的镜像很快；真正跨不动的跨境段改走
-      # SSH 直传。这一步失败不拦部署：服务器脚本会回退 GHCR 直拉。
-      - name: 导出镜像（pull + save + gzip）
-        run: |
-          IMAGE="ghcr.io/$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]'):latest"
-          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
-          docker pull "$IMAGE"
-          docker save "$IMAGE" | gzip -1 > /tmp/jietingche-image.tar.gz
-          du -h /tmp/jietingche-image.tar.gz
-          docker logout ghcr.io
-
-      - name: 镜像直传服务器（rsync 断点续传 ×3）
-        env:
-          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
-          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
-          DEPLOY_PASSWORD: ${{ secrets.DEPLOY_PASSWORD }}
-          DEPLOY_PORT: ${{ secrets.DEPLOY_PORT || '22' }}
-        run: |
-          sudo apt-get -qq update >/dev/null && sudo apt-get -qq install -y sshpass >/dev/null
-          ok=""
-          for i in 1 2 3; do
-            echo "--- 第 $i 次传输"
-            if sshpass -p "$DEPLOY_PASSWORD" rsync --partial --append-verify \
-              -e "ssh -p ${DEPLOY_PORT} -o StrictHostKeyChecking=accept-new" \
-              /tmp/jietingche-image.tar.gz \
-              "$DEPLOY_USER@$DEPLOY_HOST:/var/tmp/jietingche-image.tar.gz"; then
-              ok=1
-              break
-            fi
-            sleep 10
-          done
-          if [ -z "$ok" ]; then
-            echo "::warning::镜像直传失败，服务器将回退 GHCR 直拉"
-          fi
+          REGISTRY_USERNAME: ${{ secrets.REGISTRY_USERNAME }}
+          REGISTRY_PASSWORD: ${{ secrets.REGISTRY_PASSWORD }}
 
       - name: SSH 部署
         uses: appleboy/ssh-action@v1
@@ -183,16 +210,19 @@ jobs:
           DEPLOY_SITE_DIR: ${{ secrets.DEPLOY_SITE_DIR }}
           APP_PORT: ${{ secrets.APP_PORT }}
           REFRESH_ENV: ${{ inputs.refresh_env || 'false' }}
+          REGISTRY_IMAGE: ${{ secrets.REGISTRY_IMAGE }}
+          REGISTRY_USERNAME: ${{ secrets.REGISTRY_USERNAME }}
+          REGISTRY_PASSWORD: ${{ secrets.REGISTRY_PASSWORD }}
         with:
           host: ${{ secrets.DEPLOY_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
           password: ${{ secrets.DEPLOY_PASSWORD }}
           port: ${{ secrets.DEPLOY_PORT || 22 }}
-          envs: DEPLOY_SITE_DIR,APP_PORT,REFRESH_ENV
+          envs: DEPLOY_SITE_DIR,APP_PORT,REFRESH_ENV,REGISTRY_IMAGE,REGISTRY_USERNAME,REGISTRY_PASSWORD
           command_timeout: 30m
           script: |
             set -eu
-            IMAGE="ghcr.io/$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]'):latest"
+            IMAGE="ghcr.io/$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]'):${{ github.sha }}"
             CONTAINER="jietingche"
             # 站点目录跟着 1Panel 走：1Panel 备份/迁移站点时会一起带上 data/
             SITE_DIR="${DEPLOY_SITE_DIR:-/opt/1panel/www/sites/jietingche.shenzjd.com}"
@@ -203,9 +233,9 @@ jobs:
             APP_PORT="${APP_PORT:-3000}"
             PRECHECK="${CONTAINER}-precheck"
 
-            # 镜像获取：CI 直传的包优先（load 即用，不走跨境 registry），没有
-            # 或加载失败再回退 GHCR 直拉——跨境能不能拉完看运气，所以只做兜底。
-            TRANSFERRED="/var/tmp/jietingche-image.tar.gz"
+            # 镜像获取：境内中转优先（秒级），没配或拉不动才回退跨境直拉 GHCR。
+            # 两个通道都按本次 commit sha 拉，不认 latest——中转推失败时 latest
+            # 还停在上一次构建，按 latest 拉会静默部署旧版本。
             pull_from_ghcr() {
               # login 不带 sudo 会把凭据写进 SSH 用户的 ~/.docker，sudo pull 读的是 /root/.docker
               echo "${{ secrets.GITHUB_TOKEN }}" | sudo docker login ghcr.io -u ${{ github.actor }} --password-stdin
@@ -213,17 +243,21 @@ jobs:
               # 拉完立刻登出：留着这个 job 级 token 会让之后所有 pull 被打成 denied
               sudo docker logout ghcr.io || true
             }
-            if sudo test -s "$TRANSFERRED"; then
-              echo "=== 加载 CI 直传的镜像 ==="
-              if sudo docker load -i "$TRANSFERRED"; then
-                sudo rm -f "$TRANSFERRED"
+            if [ -n "${REGISTRY_IMAGE:-}" ]; then
+              MIRROR_HOST="${REGISTRY_IMAGE%%/*}"
+              MIRROR_TAG="$REGISTRY_IMAGE:${{ github.sha }}"
+              echo "=== 从境内中转拉取 $MIRROR_TAG（$MIRROR_HOST） ==="
+              # login 与 pull 都算一次尝试：密码错也算中转不可用，一样回退
+              if echo "$REGISTRY_PASSWORD" | sudo docker login "$MIRROR_HOST" -u "$REGISTRY_USERNAME" --password-stdin \
+                && sudo docker pull "$MIRROR_TAG"; then
+                IMAGE="$MIRROR_TAG"
               else
-                echo "镜像包加载失败（传输损坏？），回退 GHCR 直拉"
-                sudo rm -f "$TRANSFERRED"
+                echo "⚠️ 中转不可用，回退跨境直拉 GHCR（可能很慢）"
                 pull_from_ghcr
               fi
+              sudo docker logout "$MIRROR_HOST" || true
             else
-              echo "=== 无直传镜像包，回退 GHCR 直拉 ==="
+              echo "=== 未配置镜像中转，走跨境直拉 GHCR ==="
               pull_from_ghcr
             fi
 

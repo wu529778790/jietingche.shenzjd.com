@@ -192,9 +192,13 @@ ADMIN_PASSWORD='换成一个强口令'
 
 ## 部署（GitHub Actions → 自己服务器）
 
-`.github/workflows/deploy.yml`：push main 自动跑「类型检查 + lint + 构建」→ 构建镜像推 GHCR →
-SSH 到服务器拉取换容器。服务器上只要有 Docker；业务库是宿主机上的 `data/app.db`，挂进容器 `/app/data`
-（`-v "$DATA_DIR:/app/data"`），换容器不丢。
+`.github/workflows/deploy.yml`：push main 自动跑「类型检查 + lint + 构建」→ 构建镜像同时推 GHCR 与
+境内中转 registry → SSH 到服务器从**中转**拉取换容器。服务器上只要有 Docker；业务库是宿主机上的
+`data/app.db`，挂进容器 `/app/data`（`-v "$DATA_DIR:/app/data"`），换容器不丢。
+
+镜像必须经境内中转：广州服务器直连 `ghcr.io` 会被跨境网络掐断（实测 32 分钟拉不完），
+`CI save + rsync 直传` 也不行（跨境上行不到 1 Mbps，80 MB 传 17 分钟）。所以走「CI 双推 →
+服务器境内拉」，没配中转时脚本会告警并回退 GHCR 直拉。
 
 服务器上落在 1Panel 站点目录 `/opt/1panel/www/sites/jietingche.shenzjd.com`（可用 `DEPLOY_SITE_DIR` 改），
 所有运行时文件收在 `data/` 下，1Panel 备份站点时会一起带上：
@@ -210,6 +214,12 @@ SSH 到服务器拉取换容器。服务器上只要有 Docker；业务库是宿
 仓库 Settings → Secrets 需要配：`DEPLOY_HOST`、`DEPLOY_USER`、`DEPLOY_PASSWORD`、
 `TURSO_DATABASE_URL`、`TURSO_AUTH_TOKEN`、`ADMIN_PASSWORD`，可选 `DEPLOY_PORT`（默认 22）、
 `DEPLOY_SITE_DIR`、`APP_PORT`（默认 3000，线上用的是 6715）、`JTC_SHARE_CODE`。
+
+镜像中转（不配就等于每次跨境直拉，很慢）：
+`REGISTRY_IMAGE`（完整仓库路径，不含 tag，全小写，例如
+`registry.cn-guangzhou.aliyuncs.com/jietingche/app`）、`REGISTRY_USERNAME`、`REGISTRY_PASSWORD`。
+阿里云 ACR 个人版免费：开通后建命名空间 → 建私有仓库 → 在「访问凭证」里设固定密码，
+用户名是阿里云账号全名。腾讯云 TCR 同理（用户名是云 API 密钥 ID）。
 
 部署顺序是「拉镜像 → 临时容器预检 → 换容器 → 容器内探活」，任一步失败都保留旧容器/
 旧镜像（`jietingche:previous`）可回滚，不会出现停服又拉不起来的情况。预检用的是业务库的
