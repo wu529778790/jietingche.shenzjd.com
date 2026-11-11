@@ -50,10 +50,28 @@ export function preflight(req: Request): Response {
   return new Response(null, { status: 204, headers: corsHeaders(req) });
 }
 
+/**
+ * 客户端 IP（限流分桶键）。
+ *
+ * 优先 EdgeOne 的 EO-Connecting-IP：它由边缘节点写入并覆盖客户端自带的同名头，
+ * 是链路上唯一「访客改不了」的字段。旧的 XFF-first 写法有两个坑：
+ *   - 源站 80 端口公网直达，脚本直连时自己编一个 X-Forwarded-For 就能换桶绕限流；
+ *   - 走 CDN 时 XFF 可能被中间层追加，取到的未必是访客而是边缘地址。
+ */
 export function clientIp(req: Request): string {
+  const direct =
+    req.headers.get("eo-connecting-ip") ??
+    req.headers.get("cf-connecting-ip") ??
+    req.headers.get("x-real-ip");
+  const ip = direct?.trim();
+  if (ip) return ip;
+
   const forwarded = req.headers.get("x-forwarded-for");
-  if (forwarded) return forwarded.split(",")[0].trim();
-  return req.headers.get("x-real-ip") ?? "unknown";
+  if (forwarded) {
+    const first = forwarded.split(",")[0]?.trim();
+    if (first) return first;
+  }
+  return "unknown";
 }
 
 function take(scope: string, req: Request, limit: number): boolean {

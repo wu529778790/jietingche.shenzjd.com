@@ -55,7 +55,7 @@ export async function GET() {
     return new Response(cache.xml, {
       headers: {
         "Content-Type": "application/xml; charset=utf-8",
-        "Cache-Control": "public, max-age=1800",
+        "Cache-Control": "public, max-age=300, s-maxage=1800, stale-while-revalidate=86400",
       },
     });
   }
@@ -92,7 +92,7 @@ export async function GET() {
     return new Response(xml, {
       headers: {
         "Content-Type": "application/xml; charset=utf-8",
-        "Cache-Control": "public, max-age=1800",
+        "Cache-Control": "public, max-age=300, s-maxage=1800, stale-while-revalidate=86400",
       },
     });
   } catch (error) {

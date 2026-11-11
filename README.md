@@ -176,7 +176,21 @@ npm run toy -- --snapshot data/jtc-snapshot.json        # B站 Toy → platforms
 
 公开接口统一走 `src/lib/api.ts`：CORS 白名单（`ALLOWED_ORIGINS`，逗号分隔，`*` 表示全放开）、
 按 IP 每分钟限流（搜索 240 / 其它 120，进程内计数）、统一 `{ ok, data }` 结构，
-搜索和分面还带 `Cache-Control`。
+搜索和分面还带 `Cache-Control`。分桶键优先取 `EO-Connecting-IP`（EdgeOne 写入并覆盖同名头），
+退到 `X-Real-IP`/`X-Forwarded-For`——别把 XFF 放第一位，源站直连时它是客户端自己编的。
+
+反采集（`src/proxy.ts`）：
+
+- **只拦 UA 明确的采集器**：ahrefs/semrush/mj12 这类 SEO 工具、python-requests/scrapy/okhttp/
+  puppeteer 这类裸脚本与无头浏览器，搜索引擎（Google/Bing/百度/搜狗/360/头条/Petal/
+  Applebot）与社交预览一律放行。
+- **不拦 curl/wget，也不拦空 UA**：发版脚本的健康检查就是从宿主机 `curl 127.0.0.1`
+  打进来的，拦了 `deploy.yml` 会直接失败；空 UA 可能是 CDN 的回源/预热探测，拦错会被
+  判成源站不可用。这两类量级交给上面的 IP 频控。
+- `BOT_BLOCK=off` 一键关掉整套 UA 拦截，`BLOCK_UA_EXTRA` 追加正则片段（逗号分隔）做热修。
+- 页面不禁爬：落地页有 5 分钟 CDN 缓存，爬虫打到的是 EdgeOne，而且它们本来就是流量来源。
+  `/api/search` 让前端把坐标取 3 位小数（≈110m 网格），同一片区拼出同一个 URL，
+  重复搜索落 CDN 而不是回源。
 
 ```bash
 # 生产必须配置，容器启动时注入即可（proxy 固定跑 Node 运行时，不需要构建期写死）

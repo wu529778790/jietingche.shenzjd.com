@@ -35,6 +35,16 @@ const GEO_CACHE_KEY = "jtc:geo";
 const GEO_CACHE_TTL = 30 * 60 * 1000;
 
 type Coords = { lat: number; lng: number };
+
+/**
+ * 坐标保留 3 位小数（≈110m 网格）。
+ *
+ * 只影响「离我多远」的排序精度，但把 /api/search 的 URL 从「每人一个唯一 query」
+ * 变成「同片区共用一套 query」——否则 EdgeOne 永远 MISS，每个访客的搜索都要回源。
+ */
+function roundCoord(value: number): number {
+  return Math.round(value * 1000) / 1000;
+}
 /** 定位结果连同反查到的城市一起缓存，下次进来不用再问一遍 */
 type GeoCache = Coords & { city?: string };
 
@@ -244,7 +254,7 @@ export default function HomeSearch() {
       // 刚定位过就直接复用，既不弹权限也不让列表抖一下；force 只用来跳过缓存
       const cached = force ? null : readGeoCache();
       if (cached) {
-        setCoords({ lat: cached.lat, lng: cached.lng });
+        setCoords({ lat: roundCoord(cached.lat), lng: roundCoord(cached.lng) });
         if (cached.city && !cityTouched.current) {
           setCity(cached.city);
           setDistrict("");
@@ -260,7 +270,10 @@ export default function HomeSearch() {
       setGeoError("");
       navigator.geolocation.getCurrentPosition(
         async (pos) => {
-          const next = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+          const next = {
+            lat: roundCoord(pos.coords.latitude),
+            lng: roundCoord(pos.coords.longitude),
+          };
           writeGeoCache(next);
           // 先反查城市再一次性写回坐标，避免「坐标变一次、城市变一次」连跳两次
           const hit = await resolveCity(next);
