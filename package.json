@@ -7,7 +7,6 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "deploy": "bash scripts/deploy.sh",
     "db:push": "node scripts/push-to-turso.mjs",
     "db:pull": "node --no-warnings scripts/pull-from-turso.mjs",
     "db:clean": "node --no-warnings scripts/clean-data.mjs",

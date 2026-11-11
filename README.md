@@ -190,41 +190,32 @@ ADMIN_PASSWORD='换成一个强口令'
 `src/lib/adminTypes.ts` 放台账/对账类型，`src/lib/rows.ts` 放 libsql `Row` → 业务对象的映射（仅服务端）。
 `PackageSheet` 只保留访客出码逻辑，原先混在里面的话术、记台账等推广员功能已删除。
 
-## 部署（本机一条命令）
+## 部署（push main 自动）
 
-```bash
-npm run deploy
-```
+`.github/workflows/deploy.yml`：push main 自动跑「类型检查 + lint + 构建」→ 构建镜像推 **Docker Hub**
+→ SSH 到服务器 `docker pull` 换容器。业务库是宿主机上的 `data/app.db`，挂进容器 `/app/data`，
+换容器不丢。
 
-流程：Mac 上 `next build` → `rsync` 增量同步产物到服务器 → 服务器本地组镜像 → 预检 → 换容器。
-
-**为什么不用 GitHub Actions 部署**（每条都是实测过的）：
+**为什么镜像走 Docker Hub**（每条都是实测的）：
 
 | 方案 | 实测结果 |
 |---|---|
-| 服务器直连 GHCR 拉镜像 | 32 分钟拉不完，失败 |
+| 服务器直连 GHCR 拉 | 32 分钟拉不完，失败 |
 | CI `docker save` + rsync 直传 | 跨境上行 <1 Mbps，80 MB 传 17 分钟未完成 |
-| CI 推腾讯云 TCR 中转 | 上行约 30 KB/s，80 MB 要 45 分钟 |
-| CI 拆层后再推 | 19 MB 仍要 15 分钟以上 |
+| CI 推腾讯云 TCR（境内 registry） | 出海 30 KB/s，80 MB 要 45 分钟 |
+| **CI 推 Docker Hub** | 境外机房之间，25 秒量级 |
+| **服务器拉 docker.io** | 走 `mirror.ccs.tencentyun.com` 内网加速，136 MB 实测 **3 秒** |
 
-瓶颈从来不是 registry，而是 **GitHub runner 出海的管道只有 30 KB/s**。而 Mac 和服务器都在
-国内，同一份产物（首次 16 MB 打包量，之后每次只有 `.next` 的几 MB）几秒钟就同步完。
+关键在于**两个方向都不跨境**：推是境外→境外，拉是腾讯云内网代理。服务器 `/etc/docker/daemon.json`
+已配该加速器，所以 `docker pull` 自动生效。
 
-`.github/workflows/deploy.yml` 因此只保留「类型检查 + lint + 构建」的校验，不再部署。
+镜像在 Docker Hub 上是 **public**（加速器只代理公开镜像，私有就只能直连 docker.io）。
+镜像里只有编译产物，`TURSO_*` / `ADMIN_PASSWORD` 等运行时配置通过 `data/.env` 以 `--env-file`
+注入，不进镜像，运行时也**不需要登录** Docker Hub。
 
-配置放 `.env.deploy`（已 gitignore，含服务器密码）：
-
-```bash
-DEPLOY_HOST=1.2.3.4
-DEPLOY_USER=root
-DEPLOY_PASSWORD=xxx     # 本机需要 sshpass（brew install sshpass）
-DEPLOY_PORT=22          # 可选
-DEPLOY_SITE_DIR=/opt/1panel/www/sites/jietingche.shenzjd.com   # 可选
-APP_PORT=6715           # 可选
-```
-
-常用开关：`npm run deploy -- --skip-build`（用现有 `.next` 产物，只同步+部署）、
-`npm run deploy -- --skip-sync`（产物没变，只重跑服务器端构建与切换）。
+需要的 GitHub secrets：`DOCKERHUB_USERNAME`（Docker ID，不是邮箱）、`DOCKERHUB_TOKEN`、
+`DEPLOY_HOST`、`DEPLOY_USER`、`DEPLOY_PASSWORD`、`TURSO_DATABASE_URL`、`TURSO_AUTH_TOKEN`，
+可选 `DEPLOY_PORT`、`DEPLOY_SITE_DIR`、`APP_PORT`（线上 6715）、`ADMIN_PASSWORD`、`JTC_SHARE_CODE`。
 
 服务器上落在 1Panel 站点目录 `/opt/1panel/www/sites/jietingche.shenzjd.com`（可用 `DEPLOY_SITE_DIR` 改），
 所有运行时文件收在 `data/` 下，1Panel 备份站点时会一起带上：
@@ -233,17 +224,13 @@ APP_PORT=6715           # 可选
   缺失或空库直接中止部署，避免上线一个空白站。目录和文件 owner 必须是 `1001`（容器以 `nextjs` 运行，
   SQLite 要在同目录写 `-wal`/`-journal`）。
 - `data/.env`：`TURSO_DATABASE_URL` / `TURSO_AUTH_TOKEN` / `ADMIN_PASSWORD` / `ALLOWED_ORIGINS` / `JTC_SHARE_CODE`。
-  chmod 600，`ALLOWED_ORIGINS` 不配默认 `*`。**新机器需要手动放一份**（本地发版脚本不会生成它，
-  缺文件会直接中止部署）。
+  chmod 600，`ALLOWED_ORIGINS` 不配默认 `*`。首次部署若不存在，会用 GitHub secrets 自动生成，
+  之后以服务器上这份为准；想把 secret 的改动刷进服务器，手动跑一次 workflow 勾 `refresh_env=true`。
 - `data/uploads/`：挂到容器 `/app/public/uploads`，换容器不丢（码图已改成前端生成，这里是通用上传位）。
 
-部署顺序是「服务器本地组镜像 → 临时容器预检 → 换容器 → 容器内探活 → 缓存头断言」，任一步失败都
-保留旧容器/旧镜像（`jietingche:previous`）可回滚，不会出现停服又拉不起来的情况。预检用的是业务库的
+部署顺序是「拉镜像 → 临时容器预检 → 换容器 → 容器内探活 → 缓存头断言」，任一步失败都保留旧容器/
+旧镜像（`jietingche:previous`）可回滚，不会出现停服又拉不起来的情况。预检用的是业务库的
 **副本**（`mktemp -d` 里 cp 一份），不会和线上容器抢同一个 SQLite 文件的写锁。
-
-产物同步用 `rsync -az --delete` 到 `<SITE_DIR>/release/`：`node_modules` 基本不变会被跳过，
-每次实际只传 `.next` 那几 MB。`data/app.db` 不会被带上去（构建期 file tracing 带进来的副本会先删掉），
-业务库只认服务器上的 `data/app.db`。
 
 **业务库怎么更新到服务器**（改了数据/后台改过库之后）：
 
