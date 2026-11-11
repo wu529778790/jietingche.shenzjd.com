@@ -9,6 +9,7 @@ const TABS = [
   { href: "/admin/parks", label: "车场库" },
   { href: "/admin/logs", label: "台账" },
   { href: "/admin/stats", label: "对账" },
+  { href: "/admin/traffic", label: "流量" },
 ];
 
 export default function AdminPanelLayout({ children }: { children: ReactNode }) {

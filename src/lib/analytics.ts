@@ -1,0 +1,164 @@
+/**
+ * 流量报表的读端：把 visit_logs 聚合成后台能直接看的样子。
+ *
+ * 口径（很重要，别和「真实商业数据」混）：
+ *   - pv / uv 只统计 kind=page，即页面请求；api 与 event 单列。
+ *   - uv 按 ip_hash 去重，等于「独立来源数」，不是人数——公司网络/运营商 NAT 会合并。
+ *   - 二维码漏斗：park_pv（车场页曝光，页面本身就出码）→ sheet（首页点开套餐码弹层）
+ *     → save（点了「下载二维码」）。微信内长按识别、iOS 存相册都点不到按钮，
+ *     所以 save 一定小于真实拿到码的人数；再往后的扫码发生在捷停车官方小程序，本站拿不到。
+ *   - direct = 请求没带 EdgeOne 特征头，即绕过 CDN 直连源站。
+ */
+import { db, ensureSchema, num, str } from "./db";
+import { dayKey } from "./visitLog";
+
+export interface DailyTraffic {
+  day: string;
+  pv: number;
+  uv: number;
+  api: number;
+  events: number;
+  blocked: number;
+  parkPv: number;
+  sheet: number;
+  save: number;
+  search: number;
+}
+
+export interface UaStat {
+  cls: string;
+  hits: number;
+  uv: number;
+}
+
+export interface PageStat {
+  path: string;
+  pv: number;
+  uv: number;
+  blocked: number;
+}
+
+export interface SourceStat {
+  ipHash: string;
+  prefix: string;
+  uaClass: string;
+  hits: number;
+  firstTs: number;
+  lastTs: number;
+  direct: number;
+  sample: string;
+}
+
+export interface TrafficReport {
+  days: number;
+  since: number;
+  /** 服务端的「今天」（北京时间），前端别自己算 Date.now()，构建期会被判成不稳定值 */
+  today: string;
+  daily: DailyTraffic[];
+  ua: UaStat[];
+  pages: PageStat[];
+  sources: SourceStat[];
+  queries: { q: string; n: number }[];
+  /** 全站未经过 CDN 的请求数 / 总请求数 */
+  directHits: number;
+  totalHits: number;
+}
+
+export async function trafficReport(days = 7): Promise<TrafficReport> {
+  await ensureSchema();
+  const since = Date.now() - days * 24 * 60 * 60 * 1000;
+
+  const [dailyRes, uvRes, uaRes, pageRes, sourceRes, queryRes, directRes] = await Promise.all([
+    db.execute({
+      sql: `SELECT day,
+                   SUM(kind = 'page') AS pv,
+                   SUM(kind = 'api') AS api,
+                   SUM(kind = 'event') AS events,
+                   SUM(status = 403) AS blocked,
+                   SUM(kind = 'page' AND path LIKE '/park/%') AS park_pv,
+                   SUM(kind = 'event' AND name = 'sheet_open') AS sheet,
+                   SUM(kind = 'event' AND name = 'qr_save') AS save,
+                   SUM(kind = 'event' AND name = 'search') AS search
+            FROM visit_logs WHERE ts >= ? GROUP BY day ORDER BY day`,
+      args: [since],
+    }),
+    db.execute({
+      sql: `SELECT day, COUNT(DISTINCT ip_hash) AS uv
+            FROM visit_logs WHERE ts >= ? AND kind = 'page' GROUP BY day`,
+      args: [since],
+    }),
+    db.execute({
+      sql: `SELECT ua_class AS cls, COUNT(*) AS hits, COUNT(DISTINCT ip_hash) AS uv
+            FROM visit_logs WHERE ts >= ? AND kind <> 'event'
+            GROUP BY ua_class ORDER BY hits DESC`,
+      args: [since],
+    }),
+    db.execute({
+      sql: `SELECT path, COUNT(*) AS pv, COUNT(DISTINCT ip_hash) AS uv, SUM(status = 403) AS blocked
+            FROM visit_logs WHERE ts >= ? AND kind = 'page'
+            GROUP BY path ORDER BY pv DESC LIMIT 25`,
+      args: [since],
+    }),
+    db.execute({
+      sql: `SELECT ip_hash, ip_prefix, ua_class, COUNT(*) AS hits,
+                   MIN(ts) AS first_ts, MAX(ts) AS last_ts,
+                   SUM(via_cdn = 0) AS direct, MAX(ua) AS sample
+            FROM visit_logs WHERE ts >= ? AND kind <> 'event'
+            GROUP BY ip_hash ORDER BY hits DESC LIMIT 25`,
+      args: [since],
+    }),
+    db.execute({
+      sql: `SELECT q, COUNT(*) AS n FROM visit_logs
+            WHERE ts >= ? AND q <> '' GROUP BY q ORDER BY n DESC LIMIT 25`,
+      args: [since],
+    }),
+    db.execute({
+      sql: `SELECT SUM(via_cdn = 0) AS direct, COUNT(*) AS total FROM visit_logs WHERE ts >= ?`,
+      args: [since],
+    }),
+  ]);
+
+  const uvByDay = new Map(uvRes.rows.map((row) => [str(row.day), num(row.uv)]));
+
+  return {
+    days,
+    since,
+    today: dayKey(),
+    daily: dailyRes.rows.map((row) => ({
+      day: str(row.day),
+      pv: num(row.pv),
+      uv: uvByDay.get(str(row.day)) ?? 0,
+      api: num(row.api),
+      events: num(row.events),
+      blocked: num(row.blocked),
+      parkPv: num(row.park_pv),
+      sheet: num(row.sheet),
+      save: num(row.save),
+      search: num(row.search),
+    })),
+    ua: uaRes.rows.map((row) => ({
+      cls: str(row.cls),
+      hits: num(row.hits),
+      uv: num(row.uv),
+    })),
+    pages: pageRes.rows.map((row) => ({
+      path: str(row.path),
+      pv: num(row.pv),
+      uv: num(row.uv),
+      blocked: num(row.blocked),
+    })),
+    sources: sourceRes.rows.map((row) => ({
+      ipHash: str(row.ip_hash),
+      prefix: str(row.ip_prefix),
+      uaClass: str(row.ua_class),
+      hits: num(row.hits),
+      firstTs: num(row.first_ts),
+      lastTs: num(row.last_ts),
+      direct: num(row.direct),
+      sample: str(row.sample).slice(0, 60),
+    })),
+    queries: queryRes.rows.map((row) => ({ q: str(row.q), n: num(row.n) })),
+    directHits: num(directRes.rows[0]?.direct),
+    totalHits: num(directRes.rows[0]?.total),
+  };
+}

@@ -192,6 +192,25 @@ npm run toy -- --snapshot data/jtc-snapshot.json        # B站 Toy → platforms
   `/api/search` 让前端把坐标取 3 位小数（≈110m 网格），同一片区拼出同一个 URL，
   重复搜索落 CDN 而不是回源。
 
+### 访问日志与埋点
+
+零日志时连「有人在爬」都只能靠猜，所以 `visit_logs` 一张表装三类行（`kind`）：
+
+| kind | 写入方 | 内容 |
+|---|---|---|
+| `page` | `proxy.ts` | 页面请求（含 `/park/*` 的 `park_code`），爬虫被拦的 403 也记 |
+| `api` | `proxy.ts` | 接口调用（`name` 是接口名，`/api/search` 顺手记下 `q`） |
+| `event` | `POST /api/log` | 前端埋点：`sheet_open`（点开套餐码弹层）、`qr_save`（保存二维码图）、`search` |
+
+口径与边界：
+
+- 不存原始 IP，只存加盐 `sha256` 前 16 位（UV、以及「同一来源刷了多少次」够用）和 `/24`、`/48` 网段。
+- `via_cdn=0` 表示请求没带 EdgeOne 特征头，即**绕过 CDN 直连源站**——这一列比任何推测都准。
+- 二维码链路只能测到「点了保存/下载」这一步：微信内长按识别、iOS 存相册都点不到按钮，
+  真实拿码人数一定更高；扫码之后发生在捷停车官方小程序，本站拿不到。
+- 后台看板：`/admin/traffic`（今日 PV/UV、来源构成、请求最多来源、热门页面、搜索词、每日趋势）。
+- 保留 90 天，`LOG_KEEP_DAYS` 可调；`LOG_OFF=1` 一键停采集；`LOG_SALT` 换盐会让历史 UV 断代。
+
 ```bash
 # 生产必须配置，容器启动时注入即可（proxy 固定跑 Node 运行时，不需要构建期写死）
 ADMIN_PASSWORD='换成一个强口令'

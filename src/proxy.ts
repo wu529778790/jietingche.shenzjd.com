@@ -46,6 +46,15 @@ const LANDING_CACHE_CONTROL =
 function logVisit(req: NextRequest, pathname: string, status: number) {
   const headers = req.headers;
   const isApi = pathname.startsWith("/api/");
+  // 车场页把 park_code 抽出来，报表才能回答「哪个车场被看/被出码了多少次」
+  let parkCode = "";
+  if (pathname.startsWith("/park/")) {
+    try {
+      parkCode = decodeURIComponent(pathname.slice("/park/".length)).split("/")[0];
+    } catch {
+      parkCode = "";
+    }
+  }
   void recordVisit({
     kind: isApi ? "api" : "page",
     name: isApi ? pathname.replace(/^\/api\//, "").split("/")[0] : "",
@@ -58,6 +67,9 @@ function logVisit(req: NextRequest, pathname: string, status: number) {
     status,
     // EdgeOne 回源一定会带 EO-Connecting-IP；没有这个头就是没经过 CDN（直连源站）
     viaCdn: headers.has("eo-connecting-ip") || headers.has("cf-connecting-ip"),
+    parkCode,
+    // 搜索词记在访问日志里，爬虫刷的搜索词也能一并看到（前端埋点只能收真人的）
+    q: isApi && pathname.endsWith("/search") ? (req.nextUrl.searchParams.get("q") ?? "") : "",
   });
 }
 
