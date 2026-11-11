@@ -21,10 +21,13 @@ function isPublic(pathname: string, method: string): boolean {
 }
 
 /**
- * 落地页（city/district/park）的 CDN 缓存头。
+ * 落地页（首页/city/district/park）的 CDN 缓存头。
  * 这些路由是阻塞式渲染（instant=false），Next 恒发 no-store，中间件在这里覆盖成
  * 可被 EdgeOne 缓存的头；数据新鲜度由页面内 use cache 保证（seo.ts LANDING_CACHE_LIFE），
  * s-maxage 与其 revalidate 保持一致，别让 CDN 窗口超过数据缓存窗口。
+ *
+ * 首页也走这套：不带缓存头时 Next 会给静态路由下发 s-maxage=31536000，
+ * 一旦首页被静态预渲染，空壳就会在 CDN 上待一整年。
  */
 const LANDING_CACHE_CONTROL =
   "public, max-age=60, s-maxage=300, stale-while-revalidate=86400";
@@ -32,7 +35,7 @@ const LANDING_CACHE_CONTROL =
 export async function proxy(req: NextRequest) {
   const { pathname } = req.nextUrl;
 
-  if (pathname.startsWith("/city/") || pathname.startsWith("/park/")) {
+  if (pathname === "/" || pathname.startsWith("/city/") || pathname.startsWith("/park/")) {
     const res = NextResponse.next();
     res.headers.set("Cache-Control", LANDING_CACHE_CONTROL);
     return res;
@@ -65,5 +68,5 @@ export async function proxy(req: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/admin/:path*", "/api/:path*", "/city/:path*", "/park/:path*"],
+  matcher: ["/", "/admin/:path*", "/api/:path*", "/city/:path*", "/park/:path*"],
 };

@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { connection } from "next/server";
 import { listCheapestParks, listCityStats, listTopDistricts } from "@/lib/seoRepo";
 import { cityPath, cityShort, districtPath, parkPath, SITE_NAME } from "@/lib/seo";
 
@@ -7,8 +8,16 @@ import { cityPath, cityShort, districtPath, parkPath, SITE_NAME } from "@/lib/se
  *
  * 首页的搜索列表是客户端拉的，爬虫拿不到；这里补一组真实的 SSR 链接，
  * 让「首页 → 城市 → 区域 → 车场」这条路径对搜索引擎是通的。
+ *
+ * connection() 把这块钉在「请求到来时」渲染，禁止构建期预渲染。
+ * 病根：构建镜像时 .dockerignore 排掉了 data/，构建期读不到业务库，这里会拿到
+ * 空城市列表直接 return null；一旦被预渲染成静态页，首页就带着空壳 +
+ * s-maxage=31536000 在 CDN 上待一整年，站内链接全断、爬虫也进不来。
+ * 注意不能用 `export const dynamic`：与 nextConfig.cacheComponents 冲突，构建直接失败。
  */
 export default async function HomeLinks() {
+  await connection();
+
   const [cities, districts, cheapest] = await Promise.all([
     listCityStats(12),
     listTopDistricts(12),
