@@ -1,8 +1,9 @@
 "use client";
 
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
 import { packageQrDataUrl } from "@/lib/qr";
 import QrActions from "@/components/QrActions";
+import { beacon } from "@/lib/beacon";
 import {
   formatDistance,
   monthlyPrice,
@@ -36,6 +37,15 @@ export default function PackageSheet({ park, pkg, onClose, shareCode = "" }: Pro
 
   /** 官方套餐名带车场前缀，标题已经写了车场，这里只留套餐本身 */
   const pkgLabel = useMemo(() => shortPackageName(park.name, pkg.name), [park.name, pkg.name]);
+
+  // 「生成二维码」的埋点就在这里：弹层一打开码就已经出好了，这是页面上唯一能测到的起点
+  const track = useMemo(
+    () => ({ park: park.parkCode, pkg: pkg.sourcePackageId }),
+    [park.parkCode, pkg.sourcePackageId],
+  );
+  useEffect(() => {
+    beacon("sheet_open", track);
+  }, [track]);
 
   const facts = [
     pkg.typeLabel,
@@ -103,7 +113,7 @@ export default function PackageSheet({ park, pkg, onClose, shareCode = "" }: Pro
               />
             </div>
             <div className="mb-3">
-              <QrActions qr={qr} filename={`${park.name}-${pkgLabel}二维码`} compact />
+              <QrActions qr={qr} filename={`${park.name}-${pkgLabel}二维码`} compact track={track} />
             </div>
           </>
         ) : (

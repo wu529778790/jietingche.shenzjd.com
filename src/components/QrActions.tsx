@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useState, useSyncExternalStore } from "react";
+import { beacon } from "@/lib/beacon";
 
 /**
  * 二维码的下一步动作。
@@ -69,15 +70,20 @@ interface Props {
   filename: string;
   /** 弹层里空间紧，步骤文案压短 */
   compact?: boolean;
+  /** 埋点用：这张码属于哪个车场/套餐（只落计数，不落用户标识） */
+  track?: { park?: string; pkg?: string };
 }
 
-export default function QrActions({ qr, filename, compact = false }: Props) {
+export default function QrActions({ qr, filename, compact = false, track }: Props) {
   const inWechat = useIsWechat();
   const isIOSDevice = useIsIOS();
   const isMobile = useIsMobile();
   const [saved, setSaved] = useState(false);
 
   const save = useCallback(async () => {
+    // 这是「用户真的把码拿到手」的唯一可测点：微信内长按识别、iOS 存相册都点不到按钮，
+    // 所以真实扫码量一定大于这个数，只能当下降沿指标看
+    beacon("qr_save", track);
     let href = qr;
     let ext = "gif";
     try {
@@ -94,7 +100,7 @@ export default function QrActions({ qr, filename, compact = false }: Props) {
     link.click();
     link.remove();
     setSaved(true);
-  }, [qr, filename]);
+  }, [qr, filename, track]);
 
   // 微信内：长按识别最顺，不用下载
   if (inWechat) {

@@ -77,6 +77,40 @@ CREATE TABLE IF NOT EXISTS app_config (
   cfg_value TEXT DEFAULT '',
   updated_at INTEGER NOT NULL
 );
+
+/**
+ * 访问与事件日志（2026-11-11）。
+ *
+ * 一张表装三类行，靠 kind 区分：
+ *   page  服务端访问日志（proxy 写），回答「谁在爬、爬了哪些页」
+ *   api   接口调用（proxy 写），看接口热度与异常量
+ *   event 前端埋点（/api/log 写），回答「多少人点开了二维码/保存了图」
+ *
+ * 不存原始 IP：只存 sha256(盐+IP) 前 16 位（ip_hash，用于 UV 与「同一个人刷了多少次」）
+ * 和 /24、/48 网段（ip_prefix，用于看地域/机房分布）。via_cdn=0 就是没带 EdgeOne
+ * 特征头的请求——绕开 CDN 直连源站的痕迹会直接体现在这一列。
+ */
+CREATE TABLE IF NOT EXISTS visit_logs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  ts INTEGER NOT NULL,
+  day TEXT NOT NULL,
+  kind TEXT NOT NULL DEFAULT 'page',
+  name TEXT DEFAULT '',
+  path TEXT DEFAULT '',
+  referer TEXT DEFAULT '',
+  ua_class TEXT DEFAULT 'unknown',
+  ua TEXT DEFAULT '',
+  ip_hash TEXT DEFAULT '',
+  ip_prefix TEXT DEFAULT '',
+  country TEXT DEFAULT '',
+  region TEXT DEFAULT '',
+  status INTEGER DEFAULT 0,
+  via_cdn INTEGER DEFAULT 1,
+  park_code TEXT DEFAULT '',
+  package_id TEXT DEFAULT '',
+  q TEXT DEFAULT '',
+  extra TEXT DEFAULT ''
+);
 `;
 
 /**
@@ -95,6 +129,9 @@ CREATE INDEX IF NOT EXISTS idx_parks_city ON car_parks(city);
 CREATE INDEX IF NOT EXISTS idx_parks_code ON car_parks(park_code);
 CREATE INDEX IF NOT EXISTS idx_logs_created ON outreach_logs(created_at);
 CREATE INDEX IF NOT EXISTS idx_stats_package ON stat_snapshots(package_id);
+CREATE INDEX IF NOT EXISTS idx_visit_day ON visit_logs(day);
+CREATE INDEX IF NOT EXISTS idx_visit_kind_ts ON visit_logs(kind, ts);
+CREATE INDEX IF NOT EXISTS idx_visit_ip ON visit_logs(ip_hash, ts);
 `;
 
 export const SCHEMA_SQL = `${TABLE_SQL}${INDEX_SQL}`;

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import FilterSheet, { type FilterValues } from "@/components/FilterSheet";
 import LocationSheet from "@/components/LocationSheet";
 import PackageSheet from "@/components/PackageSheet";
+import { beacon } from "@/lib/beacon";
 import {
   SORT_OPTIONS,
   formatDistance,
@@ -192,6 +193,10 @@ export default function HomeSearch() {
         setParks((prev) => (append ? [...prev, ...list] : list));
         setTotal(json?.total ?? list.length);
         setPage(targetPage);
+        // 只记「有条件的搜索」（翻页和默认列表不算），否则搜索量会被默认列表灌水
+        if (!append && (keyword.trim() || city || district || industry || type || slot || maxPrice > 0)) {
+          beacon("search", { q: keyword.trim(), n: json?.total ?? list.length });
+        }
         return true;
       } catch {
         return false;

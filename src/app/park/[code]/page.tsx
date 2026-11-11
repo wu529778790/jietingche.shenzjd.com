@@ -263,7 +263,11 @@ export default async function ParkPage({ params }: PageProps) {
           </div>
 
           <div className="mt-2">
-            <QrActions qr={qr} filename={`${park.name}-停车月卡二维码`} />
+            <QrActions
+              qr={qr}
+              filename={`${park.name}-停车月卡二维码`}
+              track={{ park: park.parkCode }}
+            />
           </div>
 
           <p className="mt-3 text-[11px] leading-relaxed text-muted">
