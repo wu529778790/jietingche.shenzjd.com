@@ -18,11 +18,12 @@ import { cityPath, cityShort, districtPath, parkPath, SITE_NAME } from "@/lib/se
 export default async function HomeLinks() {
   await connection();
 
+  // 库不可用（挂卷没挂上、文件损坏）时宁可少这块内链，也别让首页整体 500
   const [cities, districts, cheapest] = await Promise.all([
     listCityStats(12),
     listTopDistricts(12),
     listCheapestParks(10),
-  ]);
+  ]).catch(() => [[], [], []]);
 
   if (!cities.length) return null;
 

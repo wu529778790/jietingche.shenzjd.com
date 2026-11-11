@@ -79,8 +79,14 @@ CREATE TABLE IF NOT EXISTS app_config (
 );
 `;
 
+/**
+ * idx_packages_park_status 是给「这个车场有没有在售套餐」用的：只有 park_id 单列索引时，
+ * 优化器会挑 idx_packages_status，按 status='active' 扫全部 1.8 万行再由 park_id 过滤，
+ * 8442 个车场走一遍就是 5.8 秒（首页/sitemap 卡死的根因）。复合索引让每次判断退化成索引区间。
+ */
 export const INDEX_SQL = `
 CREATE INDEX IF NOT EXISTS idx_packages_park ON packages(park_id);
+CREATE INDEX IF NOT EXISTS idx_packages_park_status ON packages(park_id, status);
 CREATE INDEX IF NOT EXISTS idx_packages_status ON packages(status);
 CREATE INDEX IF NOT EXISTS idx_packages_price ON packages(price);
 CREATE INDEX IF NOT EXISTS idx_packages_type ON packages(type_label);

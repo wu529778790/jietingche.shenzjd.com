@@ -299,16 +299,23 @@ export async function listCheapestParks(limit = 12): Promise<ParkSummary[]> {
   return res.rows.map(toParkSummary);
 }
 
-/** 车场数最多的城市 + 区（首页内链、区域页内链用） */
+/**
+ * 车场数最多的城市 + 区（首页内链、区域页内链用）。
+ *
+ * 必须写成 JOIN 而不是 `EXISTS (SELECT 1 FROM packages WHERE park_id = c.id AND ...)`：
+ * 相关子查询里带了 `status = 'active'`，SQLite 会优先选 idx_packages_status，
+ * 于是每个车场都把 1.8 万个套餐扫一遍（8442 × 18632），实测 5831ms，
+ * 首页整体被拖到 5.9 秒、EdgeOne 回源超时只拿到半截 HTML。
+ * 换成 JOIN 后走 idx_packages_park 索引，同一份数据 20ms 以内。
+ */
 export async function listTopDistricts(
   limit = 12,
 ): Promise<{ city: string; district: string; parkCount: number }[]> {
   await ensureSchema();
   const res = await db.execute({
     sql: `SELECT c.city AS city, c.district AS district, COUNT(DISTINCT c.id) AS park_count
-          FROM car_parks c
-          WHERE c.city <> '' AND c.district <> ''
-            AND EXISTS (SELECT 1 FROM packages k WHERE k.park_id = c.id AND ${ACTIVE_PACKAGE})
+          FROM car_parks c JOIN packages k ON k.park_id = c.id
+          WHERE c.city <> '' AND c.district <> '' AND ${ACTIVE_PACKAGE}
           GROUP BY c.city, c.district
           ORDER BY park_count DESC, c.city ASC
           LIMIT ?`,
@@ -340,9 +347,9 @@ export async function listParkRoutes(): Promise<
   await ensureSchema();
   const res = await db.execute({
     sql: `SELECT c.park_code AS code, c.updated_at AS updated_at, c.city AS city, c.district AS district
-          FROM car_parks c
-          WHERE c.park_code <> ''
-            AND EXISTS (SELECT 1 FROM packages k WHERE k.park_id = c.id AND ${ACTIVE_PACKAGE})
+          FROM car_parks c JOIN packages k ON k.park_id = c.id
+          WHERE c.park_code <> '' AND ${ACTIVE_PACKAGE}
+          GROUP BY c.id
           ORDER BY c.updated_at DESC`,
   });
   return res.rows.map((row) => ({
