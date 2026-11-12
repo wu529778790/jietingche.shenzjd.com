@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { ADMIN_COOKIE, isValidAdminToken } from "@/lib/adminAuth";
 import { clientIp } from "@/lib/api";
+import { routeExists } from "@/lib/routeGuard";
 import { isBotBlocked } from "@/lib/ua";
 import { recordVisit } from "@/lib/visitLog";
 
@@ -35,6 +36,34 @@ function isPublic(pathname: string, method: string): boolean {
  */
 const LANDING_CACHE_CONTROL =
   "public, max-age=60, s-maxage=300, stale-while-revalidate=86400";
+
+/**
+ * 落地页 404 页。刻意内联一份而不是走 app/not-found.tsx：
+ * 这个响应是 proxy 直接吐的，要的是「真 404 状态码」，而 PPR 下页面里
+ * notFound() 只能得到 200（见 routeGuard 注释）。
+ * 样式全内联，不依赖 CSS chunk，保证这一页永远能正常显示。
+ */
+const NOT_FOUND_HTML = `<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>页面不存在｜泊月</title><meta name="robots" content="noindex,follow">
+</head><body style="margin:0;min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;background:#f5f6f8;font-family:-apple-system,BlinkMacSystemFont,'PingFang SC','Microsoft YaHei',sans-serif;color:#10141c;padding:40px 24px;text-align:center">
+<svg viewBox="0 0 128 128" style="width:44px;height:44px;margin-bottom:18px"><path fill="#1b6bff" d="M64 14 c-19 0 -34 15 -34 33 c0 24 34 61 34 61 s34 -37 34 -61 c0 -18 -15 -33 -34 -33 Z"/><path d="M54 82 V42 H66 a13 13 0 0 1 0 26 H54" fill="none" stroke="#ffffff" stroke-width="12" stroke-linecap="round" stroke-linejoin="round"/></svg>
+<div style="font-size:19px;font-weight:600">这个页面不存在</div>
+<div style="margin-top:10px;font-size:13px;line-height:1.7;color:#6b7280;max-width:320px">可能是车场或城市已经下架，也可能是链接输错了。</div>
+<a href="/" style="margin-top:22px;display:inline-block;padding:9px 18px;border-radius:10px;background:#1b6bff;color:#fff;font-size:13px;font-weight:600;text-decoration:none">回首页搜附近车场</a>
+</body></html>`;
+
+function notFoundPage(): NextResponse {
+  return new NextResponse(NOT_FOUND_HTML, {
+    status: 404,
+    headers: {
+      "content-type": "text/html; charset=utf-8",
+      // 也让它被 CDN 缓存一会儿，免得爬虫拿错链反复打源站
+      "cache-control": "public, max-age=300",
+    },
+  });
+}
 
 /**
  * 访问日志：proxy 是唯一「所有页面 + 接口都过一遍」的地方，埋在这里才不漏。
@@ -88,6 +117,12 @@ export async function proxy(req: NextRequest) {
   }
 
   if (pathname === "/" || pathname.startsWith("/city/") || pathname.startsWith("/park/")) {
+    // 落地页先过一次存在性白名单：不存在的当场 404，别让页面渲染完再 notFound()
+    // ——PPR 下那只能得到一个「200 的 404 页」（见 routeGuard 注释）
+    if (pathname !== "/" && !(await routeExists(pathname))) {
+      if (trackable) logVisit(req, pathname, 404);
+      return notFoundPage();
+    }
     if (trackable) logVisit(req, pathname, 0);
     const res = NextResponse.next();
     res.headers.set("Cache-Control", LANDING_CACHE_CONTROL);
