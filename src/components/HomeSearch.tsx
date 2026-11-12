@@ -353,14 +353,14 @@ export default function HomeSearch() {
           <BrandPin className="h-5 w-5 shrink-0" />
           <span className="text-[15px] font-semibold leading-none tracking-[0.18em]">泊月</span>
           <span className="ml-0.5 rounded-full bg-white/15 px-1.5 py-0.5 text-[10px] leading-none text-white/85">
-            停车月卡比价
+            找能包月的停车场
           </span>
         </div>
         <h1 className="mt-2.5 text-[19px] font-semibold leading-tight">
-          停车月卡比临停便宜一半
+          附近哪能包月停车，一查就知道
         </h1>
         <div className="mt-1 text-xs text-white/80">
-          根据你的位置和需求挑车场，选好套餐扫码就能办
+          没固定车位？按位置挑最近最省的，扫码直接在官方小程序办
         </div>
         <div className="mt-3">
           <input

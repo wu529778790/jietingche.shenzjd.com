@@ -91,7 +91,7 @@ export default async function HomeLinks() {
       ) : null}
 
       <p className="px-1 pb-2 text-[11px] leading-relaxed text-muted">
-        {SITE_NAME}收录了全国主要城市的停车场月卡、季卡与夜间套餐，按位置和价格筛选后扫码即可在捷停车官方小程序办理。
+        {SITE_NAME}收录了全国主要城市的停车场月卡、季卡与夜间套餐，按位置挑最近、最省的那个，扫码即可在捷停车官方小程序办理。
         价格与规则以官方页面为准，本站不代收费用。
       </p>
     </section>

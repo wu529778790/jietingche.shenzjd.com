@@ -3,9 +3,9 @@ import type { ReactNode } from "react";
 import { OG_IMAGE, SITE_NAME, SITE_TAGLINE, SITE_URL } from "@/lib/seo";
 import "./globals.css";
 
-const TITLE_DEFAULT = `${SITE_NAME} · ${SITE_TAGLINE}，车场月卡秒查`;
+const TITLE_DEFAULT = `${SITE_NAME} · ${SITE_TAGLINE}`;
 const DESCRIPTION =
-  "按月价对比 7816 个车场的月卡、季卡、夜间套餐，按位置和需求筛，选好套餐扫码直接在捷停车官方小程序办理。";
+  "车停哪儿最省？深圳、广州、上海等城市的停车场月卡、季卡、夜间包月都收在这，按位置挑最近最省的那个，扫码在捷停车官方小程序直接办。";
 
 export const metadata: Metadata = {
   // 所有相对 canonical / og:url 都以线上域名为准，避免构建期解析成 localhost
@@ -17,11 +17,11 @@ export const metadata: Metadata = {
   description: DESCRIPTION,
   keywords: [
     "停车月卡",
-    "停车场月租",
-    "夜间停车套餐",
-    "停车优惠",
-    "月卡多少钱",
     "停车场包月",
+    "停车场月租",
+    "附近停车场",
+    "夜间停车套餐",
+    "停车包月多少钱",
   ],
   applicationName: SITE_NAME,
   alternates: { canonical: "/" },

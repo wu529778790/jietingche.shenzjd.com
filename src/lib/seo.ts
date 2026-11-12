@@ -7,8 +7,13 @@
 
 export const SITE_NAME = "泊月";
 
-/** 站点一句话定位，标题栏、OG 图、页头副标题共用 */
-export const SITE_TAGLINE = "停车月卡比价";
+/**
+ * 站点一句话定位，标题栏、OG 图、页头副标题共用。
+ *
+ * 不是「比价站」——用户要的是「我车停哪儿」，所以主语是「找停车场」，
+ * 价格只是筛选维度之一（离得近、能包月、能办，比「谁更便宜」更先决）。
+ */
+export const SITE_TAGLINE = "找附近能包月的停车场";
 
 /** 1200×630 分享图，源文件见 scripts/brand/og-card.html */
 export const OG_IMAGE = "/og.png";
