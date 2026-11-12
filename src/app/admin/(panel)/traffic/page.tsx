@@ -227,7 +227,10 @@ export default function TrafficPage() {
             <div className="divide-y divide-border">
               {data.pages.slice(0, 15).map((row) => (
                 <div key={row.path} className="flex items-center gap-2 px-3 py-1.5 text-xs">
-                  <div className="min-w-0 flex-1 truncate font-mono">{row.path}</div>
+                  {/* 显示中文名，原始路径（含 URL 编码）挂在 title 上，排查时悬浮可见 */}
+                  <div className="min-w-0 flex-1 truncate" title={row.path}>
+                    {row.label}
+                  </div>
                   <div className="shrink-0 text-muted">{row.uv} 来源</div>
                   <div className="w-12 shrink-0 text-right font-medium">{row.pv}</div>
                 </div>

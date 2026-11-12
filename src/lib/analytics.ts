@@ -30,6 +30,49 @@ function isNoiseQuery(raw: string): boolean {
   return false;
 }
 
+function decodeSeg(seg: string): string {
+  try {
+    return decodeURIComponent(seg);
+  } catch {
+    return seg;
+  }
+}
+
+/**
+ * 路径 → 人话。
+ *
+ * 原来报表直接显示 `/city/%E6%B7%B1%E5%9C%B3%E5%B8%82`，谁也看不懂；
+ * 城市页/区域页/分页/车场页各自翻成中文，车场页再翻成车场名（code 本身没意义）。
+ */
+export function pageLabel(path: string, parkNames: Map<string, string>): string {
+  const parts = path.split("/").filter(Boolean);
+  if (!parts.length) return "首页";
+  if (parts[0] === "city") {
+    const city = decodeSeg(parts[1] ?? "");
+    const rest = parts.slice(2);
+    if (rest[0] === "page" && rest[1]) return `城市页 · ${city} · 第 ${rest[1]} 页`;
+    if (rest[0]) return `区域页 · ${city} / ${decodeSeg(rest[0])}`;
+    return `城市页 · ${city}`;
+  }
+  if (parts[0] === "park") {
+    const code = decodeSeg(parts[1] ?? "");
+    const name = parkNames.get(code);
+    return name ? `车场页 · ${name}` : `车场页 · ${code}`;
+  }
+  if (parts[0] === "admin") {
+    const sub = parts.slice(1).join("/");
+    return sub ? `后台 · ${decodeSeg(sub)}` : "后台";
+  }
+  if (parts[0] === "offline") return "离线页";
+  return decodeSeg(path);
+}
+
+/** 从 /park/{code} 里取车场编码 */
+function parkCodeOf(path: string): string {
+  const match = /^\/park\/([^/]+)/.exec(path);
+  return match ? decodeSeg(match[1]) : "";
+}
+
 export interface DailyTraffic {
   day: string;
   pv: number;
@@ -50,10 +93,15 @@ export interface UaStat {
 }
 
 export interface PageStat {
+  /** 原始路径（含 URL 编码），排查时看这个 */
   path: string;
+  /** 给人看的名字：城市页 · 深圳市 / 车场页 · 深圳湾科技生态园 */
+  label: string;
   pv: number;
   uv: number;
   blocked: number;
+  /** 命中 404 的次数（多半是爬虫在猜路径，或车场已下架） */
+  missing: number;
 }
 
 export interface SourceStat {
@@ -112,7 +160,8 @@ export async function trafficReport(days = 7): Promise<TrafficReport> {
       args: [since],
     }),
     db.execute({
-      sql: `SELECT path, COUNT(*) AS pv, COUNT(DISTINCT ip_hash) AS uv, SUM(status = 403) AS blocked
+      sql: `SELECT path, COUNT(*) AS pv, COUNT(DISTINCT ip_hash) AS uv,
+                   SUM(status = 403) AS blocked, SUM(status = 404) AS missing
             FROM visit_logs WHERE ts >= ? AND kind = 'page'
             GROUP BY path ORDER BY pv DESC LIMIT 25`,
       args: [since],
@@ -140,6 +189,20 @@ export async function trafficReport(days = 7): Promise<TrafficReport> {
     }),
   ]);
 
+  // 车场页 URL 里只有 park_code，翻成车场名报表才有意义（一次 IN 查询，最多 25 个）
+  const parkCodes = Array.from(
+    new Set(pageRes.rows.map((row) => parkCodeOf(str(row.path))).filter(Boolean)),
+  );
+  const parkNames = new Map<string, string>();
+  if (parkCodes.length) {
+    const nameRes = await db.execute({
+      sql: `SELECT park_code, name FROM car_parks
+            WHERE park_code IN (${parkCodes.map(() => "?").join(",")})`,
+      args: parkCodes,
+    });
+    for (const row of nameRes.rows) parkNames.set(str(row.park_code), str(row.name));
+  }
+
   const uvByDay = new Map(uvRes.rows.map((row) => [str(row.day), num(row.uv)]));
 
   return {
@@ -163,12 +226,20 @@ export async function trafficReport(days = 7): Promise<TrafficReport> {
       hits: num(row.hits),
       uv: num(row.uv),
     })),
-    pages: pageRes.rows.map((row) => ({
-      path: str(row.path),
-      pv: num(row.pv),
-      uv: num(row.uv),
-      blocked: num(row.blocked),
-    })),
+    pages: pageRes.rows.map((row) => {
+      const path = str(row.path);
+      const missing = num(row.missing);
+      const label = pageLabel(path, parkNames);
+      return {
+        path,
+        // 404 的路径几乎都是爬虫在猜（/park/nope123），标出来免得当成真实页面
+        label: missing > 0 ? `${label}（不存在）` : label,
+        pv: num(row.pv),
+        uv: num(row.uv),
+        blocked: num(row.blocked),
+        missing,
+      };
+    }),
     sources: sourceRes.rows.map((row) => ({
       ipHash: str(row.ip_hash),
       prefix: str(row.ip_prefix),
