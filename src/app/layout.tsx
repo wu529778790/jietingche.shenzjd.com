@@ -6,7 +6,7 @@ import "./globals.css";
 
 const TITLE_DEFAULT = `${SITE_NAME} · ${SITE_TAGLINE}`;
 const DESCRIPTION =
-  "车停哪儿最省？深圳、广州、上海等城市的停车场月卡、季卡、夜间包月都收在这，按位置挑最近最省的那个，扫码在捷停车官方小程序直接办。";
+  "同一条街上，停车月卡能差好几倍价。按位置列出附近能办月卡的车场，每月多少钱一目了然，选好扫码直接在捷停车官方小程序办理。";
 
 export const metadata: Metadata = {
   // 所有相对 canonical / og:url 都以线上域名为准，避免构建期解析成 localhost
@@ -18,11 +18,11 @@ export const metadata: Metadata = {
   description: DESCRIPTION,
   keywords: [
     "停车月卡",
+    "停车月卡多少钱",
     "停车场包月",
     "停车场月租",
-    "附近停车场",
+    "附近停车场月卡",
     "夜间停车套餐",
-    "停车包月多少钱",
   ],
   applicationName: SITE_NAME,
   alternates: { canonical: "/" },

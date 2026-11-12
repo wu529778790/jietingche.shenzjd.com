@@ -216,11 +216,12 @@ export async function getDistrictSeo(
   };
 }
 
-/** 城市/区域落地页的车场列表，按折合月价从低到高 */
+/** 城市/区域落地页的车场列表，按折合月价从低到高；offset 供分页用 */
 export async function listParksByArea(
   city: string,
   district: string,
   limit = 60,
+  offset = 0,
 ): Promise<ParkSummary[]> {
   await ensureSchema();
   const where = [`c.city = ?`, ACTIVE_PACKAGE];
@@ -236,10 +237,42 @@ export async function listParksByArea(
           WHERE ${where.join(" AND ")}
           GROUP BY c.id
           ORDER BY COALESCE(${LONG_TERM_MONTHLY}, 2147483647) ASC, min_monthly ASC, c.name ASC
-          LIMIT ?`,
-    args: [...args, limit],
+          LIMIT ? OFFSET ?`,
+    args: [...args, limit, offset],
   });
   return res.rows.map(toParkSummary);
+}
+
+/**
+ * 一个区的月卡价格基准，车场页拿它算「这个车场比同区贵还是便宜」。
+ *
+ * 用中位数不用均价：库里存在 7200 元/月的极端值（指定车位/特殊合同），
+ * 均价会被拉飞，中位数才代表「这个区的典型价格」。
+ * 样本少于 5 个车场时返回 null——几个车场算出来的基准没有说服力，
+ * 这种区宁可不显示对比句，也别给出误导性的百分比。
+ */
+export async function getDistrictMonthlyBenchmark(
+  city: string,
+  district: string,
+): Promise<{ sampleCount: number; medianMonthly: number } | null> {
+  if (!city || !district) return null;
+  await ensureSchema();
+  const res = await db.execute({
+    sql: `SELECT ${MIN_MONTHLY} AS m
+          FROM car_parks c JOIN packages k ON k.park_id = c.id
+          WHERE c.city = ? AND c.district = ? AND ${ACTIVE_PACKAGE}
+          GROUP BY c.id`,
+    args: [city, district],
+  });
+  const values = res.rows
+    .map((row) => num(row.m))
+    .filter((value) => value > 0)
+    .sort((a, b) => a - b);
+  if (values.length < 5) return null;
+  return {
+    sampleCount: values.length,
+    medianMonthly: values[Math.floor(values.length / 2)],
+  };
 }
 
 /** 车场页的内链：同区优先，不够再补同城 */

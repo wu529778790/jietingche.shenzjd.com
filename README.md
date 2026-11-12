@@ -167,7 +167,17 @@ npm run toy -- --snapshot data/jtc-snapshot.json        # B站 Toy → platforms
 「首页 → 城市 → 区域 → 车场」这条路打通：
 
 - 城市/区域/车场页都有独立的 title、description、canonical、og，以及
-  `BreadcrumbList` + `ParkingFacility` / `ItemList` 结构化数据；
+  `BreadcrumbList` + `ParkingFacility` / `ItemList` / `FAQPage` 结构化数据
+  （FAQ 的页面文案和结构化数据共用同一个数组，改一处不会两边不一致）；
+- 标题模板都带价格锚点：`深圳停车月卡多少钱？1337 个车场最低 ¥60/月`、
+  `XX停车场月卡 ¥60/月（深圳坪山区）`——SERP 里带数字的比「价格与车场」更容易被点；
+- 车场页有一句只有它自己才有的数据：「比深圳坪山区 32 个车场的中间价（¥160/月）便宜约 63%」。
+  8000 页铺同一套模板会被判低质，这句话是拿同区中位数现算的，每页不同；
+  样本少于 5 个车场的区不出这句（`getDistrictMonthlyBenchmark` 返回 null）；
+- 城市页有分页 `/city/[city]/page/N`（每页 40 个车场，见 `components/seo/CityLanding.tsx`）。
+  深圳 1337 个车场，靠一页 40 条传不到其余 1300 个车场页；分页补上「城市 → 车场」这条链。
+  **第 2 页起 `noindex, follow`**：它们和第 1 页共用标题导语，进了索引就是几千个近似页，
+  但 follow 照样让爬虫顺着链接走到每个车场页；
 - 车场页的二维码是服务端现场生成的（`src/lib/qr.ts` 纯 JS，SSR 可跑）；
 - 只把「有在售套餐」的车场写进 sitemap，避免空页面被索引（当前约 8000 条车场 + 城市/区域）；
 - `sitemap.xml` 是运行时 Route Handler，进程内缓存 30 分钟，构建期不查库

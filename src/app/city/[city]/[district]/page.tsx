@@ -49,10 +49,12 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
   if (!data) return { title: "区域暂无数据", robots: { index: false } };
 
   const area = `${cityShort(data.city)}${data.district}`;
-  const title = `${area}停车月卡价格｜${data.parkCount} 个车场`;
+  const title = data.minMonthly
+    ? `${area}停车月卡多少钱？${data.parkCount} 个车场最低 ${monthlyText(data.minMonthly)}/月`
+    : `${area}停车月卡价格｜${data.parkCount} 个车场`;
   const description =
-    `${area}有 ${data.parkCount} 个停车场可办月卡，共 ${data.packageCount} 个在售套餐，` +
-    `最低 ${monthlyText(data.minMonthly)}/月起，夜间/全天可选，按折合月价排序，扫码直接办理。`;
+    `${area}有 ${data.parkCount} 个停车场能办月卡，共 ${data.packageCount} 个在售套餐，` +
+    `最低 ${monthlyText(data.minMonthly)}/月起，夜间/全天可选。按折合月价排序，扫码在捷停车官方小程序办理。`;
 
   return {
     title,
@@ -97,7 +99,7 @@ export default async function DistrictPage({ params }: PageProps) {
       <Breadcrumb items={crumbs} />
 
       <header className="card p-4">
-        <h1 className="text-lg font-semibold leading-snug">{area}停车月卡价格</h1>
+        <h1 className="text-lg font-semibold leading-snug">{area}停车月卡多少钱</h1>
         <p className="mt-1.5 text-sm leading-relaxed">
           {area}目前有 <b>{data.parkCount}</b> 个停车场、<b>{data.packageCount}</b>{" "}
           个在售停车套餐，月卡最低{" "}

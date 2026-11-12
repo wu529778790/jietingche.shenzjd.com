@@ -10,10 +10,12 @@ export const SITE_NAME = "泊月";
 /**
  * 站点一句话定位，标题栏、OG 图、页头副标题共用。
  *
- * 不是「比价站」——用户要的是「我车停哪儿」，所以主语是「找停车场」，
- * 价格只是筛选维度之一（离得近、能包月、能办，比「谁更便宜」更先决）。
+ * 三层结构：品类词「停车月卡」（用户真会搜的词）+ 位置「附近」+ 利益「谁家最省」。
+ * 不用「便宜 / 优惠」当主词：搜「便宜的停车场」的人多是找临停和免费位，我们接不住；
+ * 「优惠」在停车行业还专指临停折扣券，容易误解。也不叫「比价」——比价是工具，
+ * 用户要的是「我车停哪儿」，价格只是筛选维度之一。
  */
-export const SITE_TAGLINE = "找附近能包月的停车场";
+export const SITE_TAGLINE = "停车月卡，附近谁家最省";
 
 /** 1200×630 分享图，源文件见 scripts/brand/og-card.html */
 export const OG_IMAGE = "/og.png";
@@ -50,6 +52,14 @@ export function districtPath(city: string, district: string): string {
   return `/city/${encodeURIComponent(city)}/${encodeURIComponent(district)}`;
 }
 
+/**
+ * 城市页分页。第 1 页就是城市页本身，别产生 /page/1 的重复 URL。
+ * 分页页只作为「爬虫走到全部车场」的通道，第 2 页起 noindex、follow。
+ */
+export function cityPagePath(city: string, page: number): string {
+  return page <= 1 ? cityPath(city) : `${cityPath(city)}/page/${page}`;
+}
+
 /** 「深圳市」→「深圳」，用于标题里更自然的写法 */
 export function cityShort(city: string): string {
   return city.replace(/市$/, "");
@@ -75,10 +85,29 @@ export function breadcrumbJsonLd(items: { name: string; path?: string }[]) {
   };
 }
 
-/** 城市/区域页的车场列表结构化数据 */
+/**
+ * 常见问题结构化数据。
+ *
+ * 页面上的 FAQ 和这里必须是同一批问答——渲染用的数据数组直接喂进来，
+ * 别另写一份，否则文案改了结构化数据还是旧的，Google 会判不一致。
+ */
+export function faqJsonLd(items: { q: string; a: string }[]) {
+  return {
+    "@context": "https://schema.org",
+    "@type": "FAQPage",
+    mainEntity: items.map((item) => ({
+      "@type": "Question",
+      name: item.q,
+      acceptedAnswer: { "@type": "Answer", text: item.a },
+    })),
+  };
+}
+
+/** 城市/区域页的车场列表结构化数据；分页时用 startAt 让 position 接上前一页 */
 export function parksJsonLd(
   parks: { name: string; parkCode: string; minMonthly: number }[],
   city: string,
+  startAt = 1,
 ) {
   return {
     "@context": "https://schema.org",
@@ -87,7 +116,7 @@ export function parksJsonLd(
     numberOfItems: parks.length,
     itemListElement: parks.map((park, index) => ({
       "@type": "ListItem",
-      position: index + 1,
+      position: startAt + index,
       url: absoluteUrl(parkPath(park.parkCode)),
       name: park.name,
     })),

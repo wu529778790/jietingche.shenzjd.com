@@ -7,6 +7,7 @@ import Breadcrumb from "@/components/seo/Breadcrumb";
 import AreaGrid from "@/components/seo/AreaGrid";
 import QrActions from "@/components/QrActions";
 import {
+  getDistrictMonthlyBenchmark,
   getParkByCode,
   listNearbyParks,
   listParkPackages,
@@ -19,6 +20,7 @@ import {
   cityPath,
   cityShort,
   districtPath,
+  faqJsonLd,
   LANDING_CACHE_LIFE,
   monthlyText,
   parkPath,
@@ -40,12 +42,13 @@ export const instant = false;
 const loadParkPage = cache(async (code: string) => {
   const park = await getParkByCode(code);
   if (!park) return null;
-  const [packages, nearby, config] = await Promise.all([
+  const [packages, nearby, config, benchmark] = await Promise.all([
     listParkPackages(park.id),
     listNearbyParks(park.city, park.district, park.id, 8),
     getPublicConfig(),
+    getDistrictMonthlyBenchmark(park.city, park.district),
   ]);
-  return { park, packages, nearby, shareCode: config.shareCode };
+  return { park, packages, nearby, shareCode: config.shareCode, benchmark };
 });
 
 function cheapestMonthly(packages: { price: number; durationDays: number }[]): number {
@@ -59,6 +62,28 @@ function parkLabel(name: string): string {
   return /(停车场|停车库|车库|车场)$/.test(name) ? name : `${name}停车场`;
 }
 
+/**
+ * 这个车场在同区里算贵还是便宜。
+ *
+ * 这是车场页唯一没法被模板化的内容（同一套模板铺 8000 页，搜索引擎会判低质），
+ * 用真实数据算出「比同区中间价便宜 27%」，每页都不一样。
+ * 样本少于 5 个车场时 getDistrictMonthlyBenchmark 返回 null，这里自然不出句子。
+ */
+function pricePositionNote(
+  area: string,
+  lowest: number,
+  benchmark: { sampleCount: number; medianMonthly: number } | null,
+): string {
+  if (!lowest || !benchmark || benchmark.medianMonthly <= 0) return "";
+  const diff = (lowest - benchmark.medianMonthly) / benchmark.medianMonthly;
+  const pct = Math.round(Math.abs(diff) * 100);
+  const median = monthlyText(benchmark.medianMonthly);
+  if (pct < 5) return `和${area}的中间价（${median}/月）基本持平。`;
+  return diff < 0
+    ? `比${area} ${benchmark.sampleCount} 个车场的中间价（${median}/月）便宜约 ${pct}%。`
+    : `比${area}的中间价（${median}/月）贵约 ${pct}%，同区还有更便宜的，见下方「附近还有这些车场」。`;
+}
+
 export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
   "use cache";
   cacheLife(LANDING_CACHE_LIFE);
@@ -70,9 +95,12 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
   const area = `${cityShort(park.city)}${park.district}`;
   const label = parkLabel(park.name);
   const lowest = cheapestMonthly(packages);
-  const title = `${label}月卡价格（${area}）`;
+  // 标题带价格：SERP 上「XX停车场月卡 ¥300/月」比「月卡价格」更有信息量
+  const title = lowest
+    ? `${label}月卡 ${monthlyText(lowest)}/月（${area}）`
+    : `${label}停车月卡价格（${area}）`;
   const description = packages.length
-    ? `${label}现有 ${packages.length} 个在售停车套餐，月卡最低 ${monthlyText(lowest)}/月起，夜间、白天、全天可选，扫码直接办理。地址：${park.address || area}。`
+    ? `${label}月卡最低 ${monthlyText(lowest)}/月起，共 ${packages.length} 个套餐在售，夜间、白天、全天可选，扫码直接在官方小程序办理。地址：${park.address || area}。`
     : `${label}位于${area}，暂无在售停车套餐，可查看同区域其他车场的月卡价格。`;
 
   return {
@@ -96,9 +124,11 @@ export default async function ParkPage({ params }: PageProps) {
   const data = await loadParkPage(decodeURIComponent(code));
   if (!data) notFound();
 
-  const { park, packages, nearby, shareCode } = data;
+  const { park, packages, nearby, shareCode, benchmark } = data;
   const lowest = cheapestMonthly(packages);
   const cheapest = packages[0];
+  const area = `${cityShort(park.city)}${park.district}`;
+  const priceNote = pricePositionNote(area, lowest, benchmark);
   const qr = cheapest
     ? packageQrDataUrl(park.parkCode, cheapest.sourcePackageId, shareCode)
     : "";
@@ -137,12 +167,37 @@ export default async function ParkPage({ params }: PageProps) {
     })),
   };
 
+  const faq = [
+    {
+      q: `${park.name}月卡多少钱？`,
+      a: packages.length
+        ? `当前最低 ${monthlyText(lowest)}/月，共 ${packages.length} 个套餐在售；价格会随官方调整，以下单页显示为准。`
+        : "该车场暂无在售套餐，可以先看同区域其他车场。",
+    },
+    {
+      q: "夜间套餐白天能停吗？",
+      a: "夜间套餐通常只覆盖工作日晚间到次日早晨（如 18:30-08:30）以及周末全天，白天进出可能按临停另计。要以套餐规则里写的时间段为准。",
+    },
+    {
+      q: "扫码后在哪里付款？多久生效？",
+      a: "付款和合同都在捷停车官方小程序里完成，本站不经手资金。一般支付后当天生效，个别车场需要物业审核。",
+    },
+    {
+      q: "可以退款或者换车吗？",
+      a: "退款与换车规则由车场和官方平台约定，本站无法代办；下单前建议在官方页面确认对应套餐的退改说明。",
+    },
+  ];
+
   return (
     <article className="space-y-3">
       <script
         type="application/ld+json"
         dangerouslySetInnerHTML={{
-          __html: JSON.stringify([breadcrumbJsonLd(crumbs), facilityLd]).replace(/</g, "\\u003c"),
+          __html: JSON.stringify([
+            breadcrumbJsonLd(crumbs),
+            facilityLd,
+            faqJsonLd(faq),
+          ]).replace(/</g, "\\u003c"),
         }}
       />
 
@@ -179,6 +234,9 @@ export default async function ParkPage({ params }: PageProps) {
             <>该车场暂无在售票套餐，可先看同区域其他车场。</>
           )}
         </p>
+        {priceNote ? (
+          <p className="mt-1.5 text-xs leading-relaxed text-brand">{priceNote}</p>
+        ) : null}
       </header>
 
       {packages.length ? (
@@ -297,35 +355,12 @@ export default async function ParkPage({ params }: PageProps) {
           常见问题
         </h2>
         <dl className="mt-2 space-y-2.5 text-xs leading-relaxed">
-          <div>
-            <dt className="font-medium">{park.name}月卡多少钱？</dt>
-            <dd className="mt-0.5 text-muted">
-              {packages.length
-                ? `当前最低 ${monthlyText(lowest)}/月，共 ${packages.length} 个套餐在售，价格会随官方调整，以下单页显示为准。`
-                : "该车场暂无在售套餐，可以先看同区域其他车场。"}
-            </dd>
-          </div>
-          <div>
-            <dt className="font-medium">夜间套餐白天能停吗？</dt>
-            <dd className="mt-0.5 text-muted">
-              夜间套餐通常只覆盖工作日晚间到次日早晨（如 18:30-08:30）以及周末全天，
-              白天进出可能按临停另计。要以套餐规则里写的时间段为准。
-            </dd>
-          </div>
-          <div>
-            <dt className="font-medium">扫码后在哪里付款？多久生效？</dt>
-            <dd className="mt-0.5 text-muted">
-              付款和合同都在捷停车官方小程序里完成，本站不经手资金。
-              一般支付后当天生效，个别车场需要物业审核。
-            </dd>
-          </div>
-          <div>
-            <dt className="font-medium">可以退款或者换车吗？</dt>
-            <dd className="mt-0.5 text-muted">
-              退款与换车规则由车场和官方平台约定，本站无法代办；
-              下单前建议在官方页面确认对应套餐的退改说明。
-            </dd>
-          </div>
+          {faq.map((item) => (
+            <div key={item.q}>
+              <dt className="font-medium">{item.q}</dt>
+              <dd className="mt-0.5 text-muted">{item.a}</dd>
+            </div>
+          ))}
         </dl>
       </section>
 
