@@ -106,6 +106,8 @@ export interface PageStat {
 
 export interface SourceStat {
   ipHash: string;
+  /** 原始 IP（2026-11-12 起记录；更早的历史数据是空的，只能退回网段） */
+  ip: string;
   prefix: string;
   uaClass: string;
   hits: number;
@@ -167,7 +169,7 @@ export async function trafficReport(days = 7): Promise<TrafficReport> {
       args: [since],
     }),
     db.execute({
-      sql: `SELECT ip_hash, ip_prefix, ua_class, COUNT(*) AS hits,
+      sql: `SELECT ip_hash, MAX(ip) AS ip, ip_prefix, ua_class, COUNT(*) AS hits,
                    MIN(ts) AS first_ts, MAX(ts) AS last_ts,
                    SUM(via_cdn = 0) AS direct, MAX(ua) AS sample
             FROM visit_logs WHERE ts >= ? AND kind <> 'event'
@@ -242,6 +244,7 @@ export async function trafficReport(days = 7): Promise<TrafficReport> {
     }),
     sources: sourceRes.rows.map((row) => ({
       ipHash: str(row.ip_hash),
+      ip: str(row.ip),
       prefix: str(row.ip_prefix),
       uaClass: str(row.ua_class),
       hits: num(row.hits),

@@ -192,7 +192,8 @@ export default function TrafficPage() {
                   <div className="flex items-center gap-2">
                     <div className="min-w-0 flex-1">
                       <div className="truncate font-medium">
-                        {row.prefix || "未知网段"}
+                        {/* 11-12 之前的旧数据没存 IP，只能退回网段 */}
+                        <span className="font-mono">{row.ip || row.prefix || "未知来源"}</span>
                         {row.direct > 0 ? (
                           <span className="ml-1 rounded bg-amber-100 px-1 text-[10px] text-amber-700">
                             直连 {row.direct}

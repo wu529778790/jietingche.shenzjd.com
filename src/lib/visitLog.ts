@@ -4,8 +4,9 @@
  * 三条纪律：
  *   1. 绝不阻塞业务——调用方一律 `void recordVisit(...)`，内部自己 try/catch，
  *      日志写失败不能把页面带崩（这是「有日志」而不是「日志驱动业务」）。
- *   2. 不存原始 IP——只存加盐 sha256 前 16 位和 /24、/48 网段，
- *      既能算 UV、能做「同一个来源刷了多少次」排行，又不落个人标识。
+ *   2. **存原始 IP**（2026-11-12 用户要求：后台要能直接看到是谁在爬），
+ *      同时保留加盐 sha256 前 16 位算 UV、/24、/48 网段做聚合。
+ *      日志只在本机/自家服务器上，不进第三方，90 天后自动裁剪。
  *   3. 按天裁剪——默认只留 90 天（LOG_KEEP_DAYS 可调），每小时最多裁一次。
  *
  * 关闭方式：LOG_OFF=1（埋点接口与访问日志一起停）。
@@ -37,10 +38,30 @@ export function hashIp(ip: string): string {
   return crypto.createHash("sha256").update(`${IP_SALT}:${ip}`).digest("hex").slice(0, 16);
 }
 
+/**
+ * 归一化 IP：IPv4 映射的 IPv6（`::ffff:1.2.3.4`）还原成 `1.2.3.4`。
+ *
+ * Next/Node 在 IPv6 监听时会把所有 IPv4 访客报成 `::ffff:x.x.x.x`，
+ * 直接按字符串截前几段会得到 `::ffff::` 这种谁也看不懂的前缀。
+ */
+export function normalizeIp(raw: string): string {
+  const ip = (raw ?? "").trim();
+  if (!ip || ip === "unknown") return "";
+  if (ip.toLowerCase().startsWith("::ffff:")) {
+    const v4 = ip.slice(7);
+    if (/^\d{1,3}(\.\d{1,3}){3}$/.test(v4)) return v4;
+  }
+  return ip;
+}
+
 /** IPv4 取前三段、IPv6 取前三段十六进制位：看得出机房/地域，认不出人 */
 export function ipPrefix(ip: string): string {
   if (!ip) return "";
-  if (ip.includes(":")) return ip.split(":").slice(0, 3).join(":") + "::";
+  if (ip.includes(":")) {
+    // 前三段全为空（::1 / ::ffff: 之类回环地址）时退回原值，别拼出 "::" 这种鬼东西
+    const segs = ip.split(":").slice(0, 3);
+    return segs.some((seg) => seg) ? `${segs.join(":")}::` : ip;
+  }
   const parts = ip.split(".");
   return parts.length === 4 ? `${parts[0]}.${parts[1]}.${parts[2]}.0/24` : ip;
 }
@@ -74,11 +95,12 @@ export async function recordVisit(input: VisitInput): Promise<void> {
     await ensureSchema();
     const ts = Date.now();
     const ua = cut(input.ua ?? "", 200);
+    const ip = normalizeIp(input.ip ?? "");
     await db.execute({
       sql: `INSERT INTO visit_logs
-              (ts, day, kind, name, path, referer, ua_class, ua, ip_hash, ip_prefix,
+              (ts, day, kind, name, path, referer, ua_class, ua, ip, ip_hash, ip_prefix,
                country, region, status, via_cdn, park_code, package_id, q, extra)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       args: [
         ts,
         dayKey(ts),
@@ -88,8 +110,9 @@ export async function recordVisit(input: VisitInput): Promise<void> {
         cut(input.referer ?? "", 200),
         classifyUa(input.ua ?? ""),
         ua,
-        hashIp(input.ip ?? ""),
-        ipPrefix(input.ip ?? ""),
+        cut(ip, 60),
+        hashIp(ip),
+        ipPrefix(ip),
         cut(input.country ?? "", 24),
         cut(input.region ?? "", 40),
         input.status ?? 0,

@@ -100,6 +100,7 @@ CREATE TABLE IF NOT EXISTS visit_logs (
   referer TEXT DEFAULT '',
   ua_class TEXT DEFAULT 'unknown',
   ua TEXT DEFAULT '',
+  ip TEXT DEFAULT '',
   ip_hash TEXT DEFAULT '',
   ip_prefix TEXT DEFAULT '',
   country TEXT DEFAULT '',
@@ -155,6 +156,8 @@ export const COLUMN_MIGRATIONS: Record<string, [string, string][]> = {
     ["rule_summary", "TEXT DEFAULT ''"],
     ["source_package_id", "TEXT DEFAULT ''"],
   ],
+  // 2026-11-12：报表要能直接看到 IP（原来只有网段 + 哈希，`::ffff:` 这种截断串认不出是谁）
+  visit_logs: [["ip", "TEXT DEFAULT ''"]],
 };
 
 /** 站点配置的键名（码图不落库，全部前端现场生成） */
