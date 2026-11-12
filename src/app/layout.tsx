@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import type { ReactNode } from "react";
+import PwaRegister from "@/components/PwaRegister";
 import { OG_IMAGE, SITE_NAME, SITE_TAGLINE, SITE_URL } from "@/lib/seo";
 import "./globals.css";
 
@@ -48,6 +49,12 @@ export const metadata: Metadata = {
     images: [OG_IMAGE],
   },
   robots: { index: true, follow: true },
+  // iOS「添加到主屏」：Safari 不读 manifest，靠这几个 apple-mobile-web-app-* 开关
+  appleWebApp: {
+    capable: true,
+    title: SITE_NAME,
+    statusBarStyle: "default",
+  },
 };
 
 export const viewport: Viewport = {
@@ -63,6 +70,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
     <html lang="zh-CN" className="h-full antialiased">
       <body className="flex min-h-full flex-col">
         <main className="mx-auto w-full max-w-3xl flex-1 px-3 py-4">{children}</main>
+        <PwaRegister />
       </body>
     </html>
   );

@@ -145,6 +145,21 @@ npm run toy -- --snapshot data/jtc-snapshot.json        # B站 Toy → platforms
 改图形或改分享图文案要三处同步：`icon.svg`、`scripts/brand/og-card.html`（出图源文件）、
 `BrandMark.tsx`。重新出图的命令写在 `og-card.html` 顶部注释里。
 
+## PWA
+
+能装到主屏（安卓 Chrome 直接装，iOS Safari「添加到主屏幕」），断网时给一页提示而不是白屏。
+
+- `src/app/manifest.ts` —— 清单，Next 会自动注入 `<link rel="manifest">`；图标在 `public/icons/`
+  （`icon-192` / `icon-512` 是 any，`maskable-512` 的针缩到 52% 留给系统圆形裁切）；
+- `public/sw.js` —— 手写 SW，没引 workbox。导航网络优先（3.5s 超时吃缓存），
+  `/_next/static` 与图片缓存优先，`/api/*` 完全不拦——价格是实时的，缓存等于给用户看错价；
+- `src/components/PwaRegister.tsx` —— 只在生产构建注册，且等 `load` 之后再注册；
+- `src/app/offline/page.tsx` —— 离线兜底页，样式全部内联（断网时 globals.css 可能没进缓存）。
+
+改缓存策略或预缓存列表要把 `sw.js` 里的 `VERSION` 加一，`activate` 会清掉上一版本的 cache。
+部署侧别给 `/sw.js`、`/manifest.webmanifest` 配长缓存：源站现在给的是 `max-age=0`，
+但 CDN 一旦命中「静态资源长缓存」规则，发版后旧 SW 会一直不更新。
+
 ## SEO / 落地页
 
 首页的搜索列表是客户端拉的，爬虫拿不到；所以另开了三层服务端渲染的落地页，
