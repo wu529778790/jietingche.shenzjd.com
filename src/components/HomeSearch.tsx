@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import FilterSheet, { type FilterValues } from "@/components/FilterSheet";
 import LocationSheet from "@/components/LocationSheet";
 import PackageSheet from "@/components/PackageSheet";
@@ -74,8 +74,7 @@ function writeGeoCache(coords: GeoCache): void {
   }
 }
 
-/** nav：服务端渲染的站内导航（城市/区域入口），由 page 传进来插在筛选条下面 */
-export default function HomeSearch({ nav }: { nav?: ReactNode } = {}) {
+export default function HomeSearch() {
   const [keyword, setKeyword] = useState("");
   const [city, setCity] = useState("");
   const [district, setDistrict] = useState("");
@@ -416,14 +415,6 @@ export default function HomeSearch({ nav }: { nav?: ReactNode } = {}) {
           </button>
         ) : null}
       </section>
-
-      {/*
-        站内导航（城市/区域/最便宜车场入口）：
-        放在结果列表上面，因为列表是无限滚动——放下面等于永远看不到。
-        只在「还没开始搜索」时出现，一输关键词或选筛选就让位给结果；爬虫拿到的
-        初始 HTML 里这块是有的，站内链接链路不受影响。
-      */}
-      {!keyword.trim() && filterCount === 0 ? nav : null}
 
       {/* 首屏加载用骨架屏顶着，不出「搜索中」这种字 */}
       {loading && parks.length === 0 ? (

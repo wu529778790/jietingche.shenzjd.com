@@ -4,17 +4,14 @@ import { listCheapestParks, listCityStats, listTopDistricts } from "@/lib/seoRep
 import { cityPath, cityShort, districtPath, parkPath, SITE_NAME } from "@/lib/seo";
 
 /**
- * 首页的站内入口（服务端渲染）。
+ * 首页底部的站内入口（服务端渲染）。
  *
- * 首页的搜索列表是客户端无限滚动加载的，爬虫拿不到；这里补一组真实的 SSR 链接，
+ * 首页的搜索列表是客户端拉的，爬虫拿不到；这里补一组真实的 SSR 链接，
  * 让「首页 → 城市 → 区域 → 车场」这条路径对搜索引擎是通的。
  *
- * 位置：由 page 通过 HomeSearch 的 nav 插槽放在「筛选条下面、结果列表上面」。
- * 千万别放回列表底下——结果是无限滚动，7816 个车场永远「还有更多」，
- * 真人永远滑不到那块内链，等于白做。
- *
- * 长度：城市 chips 常显（主要入口，两三行），区域和「最便宜车场」用 <details>
- * 默认收起——链接仍在初始 HTML 里，爬虫照读，首屏又不会被内链撑爆。
+ * 为什么放底部、且不用做成显眼入口：城市有「位置」弹层、最便宜车场有「每月最省」
+ * 排序，这两块在交互上本来就是重复的，占首屏只会把结果往下挤。而结果列表是无限
+ * 滚动，真人永远滑不到这里——所以这块是**纯粹给爬虫看的**，真人看不到也不用看到。
  *
  * connection() 把这块钉在「请求到来时」渲染，禁止构建期预渲染。
  * 病根：构建镜像时 .dockerignore 排掉了 data/，构建期读不到业务库，这里会拿到
@@ -41,13 +38,12 @@ export default async function HomeLinks() {
       </h2>
 
       <div className="card p-3">
-        {/* 手机上一行横向滑（12 个城市换行要吃掉半屏首屏），桌面正常换行；链接都在 DOM 里，爬虫照读 */}
-        <div className="no-scrollbar flex gap-1.5 overflow-x-auto sm:flex-wrap sm:overflow-visible">
+        <div className="flex flex-wrap gap-1.5">
           {cities.map((city) => (
             <Link
               key={city.city}
               href={cityPath(city.city)}
-              className="shrink-0 rounded-lg border border-border px-2 py-1 text-xs transition-colors hover:border-brand/50 hover:text-brand"
+              className="rounded-lg border border-border px-2 py-1 text-xs transition-colors hover:border-brand/50 hover:text-brand"
             >
               {cityShort(city.city)}月卡
               <span className="ml-1 text-[10px] text-muted">{city.parkCount}</span>
@@ -57,14 +53,9 @@ export default async function HomeLinks() {
       </div>
 
       {districts.length ? (
-        <details className="card p-3">
-          <summary className="flex cursor-pointer list-none items-center justify-between text-xs font-medium text-muted">
-            <span>
-              热门区域 <span className="text-[11px]">（{districts.length}）</span>
-            </span>
-            <span className="text-[11px] text-muted/70">展开</span>
-          </summary>
-          <div className="mt-2 flex flex-wrap gap-1.5">
+        <div className="card p-3">
+          <div className="mb-2 text-xs font-medium text-muted">热门区域</div>
+          <div className="flex flex-wrap gap-1.5">
             {districts.map((item) => (
               <Link
                 key={`${item.city}-${item.district}`}
@@ -76,18 +67,13 @@ export default async function HomeLinks() {
               </Link>
             ))}
           </div>
-        </details>
+        </div>
       ) : null}
 
       {cheapest.length ? (
-        <details className="card p-3">
-          <summary className="flex cursor-pointer list-none items-center justify-between text-xs font-medium text-muted">
-            <span>
-              月卡最便宜的车场 <span className="text-[11px]">（{cheapest.length}）</span>
-            </span>
-            <span className="text-[11px] text-muted/70">展开</span>
-          </summary>
-          <ul className="mt-2 space-y-1">
+        <div className="card p-3">
+          <div className="mb-2 text-xs font-medium text-muted">月卡最便宜的车场</div>
+          <ul className="space-y-1">
             {cheapest.map((park) => (
               <li key={park.id} className="text-xs">
                 <Link href={parkPath(park.parkCode)} className="hover:text-brand">
@@ -101,10 +87,10 @@ export default async function HomeLinks() {
               </li>
             ))}
           </ul>
-        </details>
+        </div>
       ) : null}
 
-      <p className="px-1 text-[11px] leading-relaxed text-muted">
+      <p className="px-1 pb-2 text-[11px] leading-relaxed text-muted">
         {SITE_NAME}收录了全国主要城市的停车场月卡、季卡与夜间套餐，按位置和价格筛选后扫码即可在捷停车官方小程序办理。
         价格与规则以官方页面为准，本站不代收费用。
       </p>
