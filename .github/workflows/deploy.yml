@@ -12,7 +12,7 @@ name: Build & Deploy
 #   关键：两个方向都不再跨境，所以链路成立。
 #
 # 镜像必须是 public（加速器只代理公开镜像，私有只能直连 docker.io 就慢了）。
-# 镜像里只有编译产物；TURSO_* / ADMIN_PASSWORD 等运行时配置通过 data/.env
+# 镜像里只有编译产物；TURSO_* 等运行时配置通过 data/.env
 # 以 --env-file 注入，不进镜像。
 #
 # 数据库在 Turso（远程 libsql），容器无状态：
@@ -31,7 +31,8 @@ name: Build & Deploy
 #   DEPLOY_PORT          SSH 端口，可选（默认 22）
 #   DEPLOY_SITE_DIR      站点目录，可选
 #   APP_PORT             对外端口，可选
-#   TURSO_DATABASE_URL / TURSO_AUTH_TOKEN / ADMIN_PASSWORD  首次生成 .env 用
+#   TURSO_DATABASE_URL / TURSO_AUTH_TOKEN  首次生成 .env 用
+#   （ADMIN_PASSWORD 已废弃：后台登录改走 wx-auth，源码不再读它）
 
 on:
   push:
@@ -187,7 +188,6 @@ jobs:
               {
                 echo "TURSO_DATABASE_URL=${{ secrets.TURSO_DATABASE_URL }}"
                 echo "TURSO_AUTH_TOKEN=${{ secrets.TURSO_AUTH_TOKEN }}"
-                echo "ADMIN_PASSWORD=${{ secrets.ADMIN_PASSWORD }}"
                 echo "ALLOWED_ORIGINS=${{ secrets.ALLOWED_ORIGINS || '*' }}"
                 echo "JTC_SHARE_CODE=${{ secrets.JTC_SHARE_CODE }}"
               } | sudo tee "$ENV_FILE" >/dev/null
