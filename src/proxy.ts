@@ -9,6 +9,7 @@ import { recordVisit } from "@/lib/visitLog";
 const PUBLIC_API = new Set([
   "/api/search",
   "/api/nearby",
+  "/api/suggest",
   "/api/facets",
   "/api/locate",
   "/api/log",

@@ -6,6 +6,7 @@ import { BrandPin } from "@/components/BrandMark";
 import ParkCard from "@/components/ParkCard";
 import type { FilterValues } from "@/components/FilterSheet";
 import { beacon } from "@/lib/beacon";
+import { canSuggest } from "@/lib/searchTerms";
 import { SORT_OPTIONS, type Package, type ParkWithPackages } from "@/lib/types";
 
 interface FacetItem {
@@ -105,6 +106,20 @@ export default function HomeSearch() {
    * 现在组合期间不请求也不埋点，等候选词上屏（compositionend）再算一次。
    */
   const [imeOpen, setImeOpen] = useState(false);
+  /**
+   * 输入联想：只给库里真实存在的地名（楼宇 / 小区 / 路名 / 区名）。
+   * 它解决的是「用户敲的这个词库里根本没有」——商圈名是最典型的一类。
+   *
+   * 结果和「它是哪个词的候选」存在一起：换了词但新结果还没回来时，
+   * query 对不上，下拉自然不显示——比手动清空状态更不容易漏。
+   */
+  const [suggestResult, setSuggestResult] = useState<{
+    query: string;
+    items: { term: string; weight: number }[];
+  }>({ query: "", items: [] });
+  const [suggestOpen, setSuggestOpen] = useState(false);
+  /** 联想是连发请求，慢的那条回来不能覆盖新的 */
+  const suggestSeq = useRef(0);
   const [city, setCity] = useState("");
   const [district, setDistrict] = useState("");
   const [industry, setIndustry] = useState("");
@@ -197,6 +212,33 @@ export default function HomeSearch() {
    * 只用来补结果很少的情况：结果多的时候列表本身已经覆盖这片区域，
    * 再挂一段周边会让人以为下面还有一批更近的。
    */
+  /**
+   * 输入联想（220ms 防抖）。
+   * 拼音组合期间（imeOpen）不发：那时 keyword 是半成品，候选全是噪声。
+   */
+  useEffect(() => {
+    const q = keyword.trim();
+    if (!suggestOpen || imeOpen || !canSuggest(q)) return;
+    const timer = setTimeout(() => {
+      const seq = suggestSeq.current + 1;
+      suggestSeq.current = seq;
+      fetch(`/api/suggest?q=${encodeURIComponent(q)}`)
+        .then((res) => (res.ok ? res.json() : null))
+        .then((json) => {
+          if (suggestSeq.current !== seq) return;
+          setSuggestResult({ query: q, items: Array.isArray(json?.data) ? json.data : [] });
+        })
+        .catch(() => {
+          if (suggestSeq.current === seq) setSuggestResult({ query: q, items: [] });
+        });
+    }, 220);
+    return () => clearTimeout(timer);
+  }, [keyword, suggestOpen, imeOpen]);
+
+  /** 只显示「和当前输入对得上」的候选：换词后旧候选不会闪一下 */
+  const suggestItems =
+    suggestOpen && !imeOpen && suggestResult.query === keyword.trim() ? suggestResult.items : [];
+
   const loadNearby = useCallback(
     async (
       target: {
@@ -499,6 +541,13 @@ export default function HomeSearch() {
     setDistrict("");
   }
 
+  /** 点联想候选：当成一次搜索，并收下拉（不收的话新词会立刻再弹一轮） */
+  function pickSuggestion(term: string) {
+    skipGeo();
+    setKeyword(term);
+    setSuggestOpen(false);
+  }
+
   /** 只选区不换城市：同样算用户自己动手，别再等定位 */
   function chooseDistrict(name: string) {
     skipGeo();
@@ -548,7 +597,8 @@ export default function HomeSearch() {
 
   return (
     <div className="space-y-3">
-      <section className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-[#1b6bff] to-[#0d3fb0] px-4 pb-4 pt-4 text-white">
+      {/* 不能 overflow-hidden：联想下拉要溢出到筛选条上面，被裁掉就看不见了 */}
+      <section className="relative rounded-2xl bg-gradient-to-br from-[#1b6bff] to-[#0d3fb0] px-4 pb-4 pt-4 text-white">
         {/* 品牌不占独立一行——首屏高度要给搜索结果，锁在一行里最省 */}
         <div className="flex items-center gap-1.5">
           <BrandPin className="h-5 w-5 shrink-0" />
@@ -561,12 +611,13 @@ export default function HomeSearch() {
         <div className="mt-1 text-xs text-white/80">
           谁家最省、多少钱一目了然，扫码直接在官方小程序办
         </div>
-        <div className="mt-3">
+        <div className="relative mt-3">
           <input
             value={keyword}
             onChange={(e) => {
               skipGeo();
               setKeyword(e.target.value);
+              setSuggestOpen(true);
             }}
             // 拼音组合期间只更新输入框，不发请求也不埋点（见 imeOpen 注释）
             onCompositionStart={() => setImeOpen(true)}
@@ -574,11 +625,32 @@ export default function HomeSearch() {
               skipGeo();
               setKeyword(e.currentTarget.value);
               setImeOpen(false);
+              setSuggestOpen(true);
             }}
+            onFocus={() => setSuggestOpen(true)}
+            // 延迟关闭：直接关会让下拉里的点击先丢焦点、点不中（配合下面的 onMouseDown）
+            onBlur={() => window.setTimeout(() => setSuggestOpen(false), 120)}
             placeholder="搜车场名、楼宇或小区名，如：科技园 / 侨城坊"
             autoComplete="off"
             className="w-full rounded-xl border border-white/40 bg-white px-3.5 py-3 text-sm text-foreground placeholder:text-muted focus:outline-none"
           />
+          {/* 联想下拉：每条约等于「库里真有这个叫法，含几个车场」，点一条直接搜 */}
+          {suggestItems.length ? (
+            <div className="absolute left-0 right-0 top-full z-30 mt-1 overflow-hidden rounded-xl bg-white shadow-[0_8px_24px_rgba(16,20,28,0.18)]">
+              {suggestItems.map((item) => (
+                <button
+                  key={item.term}
+                  // 阻止默认行为，输入框不失焦，下面 onClick 才能正常触发
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => pickSuggestion(item.term)}
+                  className="flex w-full items-center justify-between gap-3 px-3.5 py-2.5 text-left text-sm text-foreground transition-colors hover:bg-black/[0.035]"
+                >
+                  <span className="truncate">{item.term}</span>
+                  <span className="shrink-0 text-[11px] text-muted">{item.weight} 个车场</span>
+                </button>
+              ))}
+            </div>
+          ) : null}
         </div>
         {geoState === "error" ? (
           <div className="mt-2 flex items-center gap-2 text-[11px] text-white/70">

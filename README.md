@@ -360,6 +360,10 @@ ssh <user>@<host> 'sudo chown 1001:1001 <SITE_DIR>/data/app.db && sudo docker st
 - `GET /api/nearby?lat=&lng=&exclude=&radius=&limit=` 以任意坐标找**能办月卡**的车场，按直线距离升序；
   半径默认 3km，这一档没货自动放到 10km，实际档位在 `meta.radiusKm` 回传。
   首页命中 ≤5 个时拿第一个车场当锚点补一段「附近还有这些车场」，车场页内链也走距离排序
+- `GET /api/suggest?q=&limit=` 输入联想：只回库里**真实存在**的地名（车场名去后缀、keywords 词、
+  路名、区/市、片区词），每条带「含几个车场」的权重，前缀匹配优先。
+  词表在进程内从 `car_parks` 现抽（`src/lib/searchTerms.ts`，缓存 30 分钟），不落表——
+  落表就多一条「导完数据记得重建」的运维规矩，忘一次联想词就永远是旧的
 - `GET /api/facets?city=` 筛选栏分面
 - `GET /api/locate?lat=&lng=` 定位反查城市（前端定位后自动选中）
 - `GET /api/config` 读前端出码用的 `shareCode`

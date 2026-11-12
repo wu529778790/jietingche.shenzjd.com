@@ -4,6 +4,7 @@ import { db, ensureSchema, newId, now, num, str } from "./db";
 import { toCarPark, toLog, toPackage, toSnapshot } from "./rows";
 import { CONFIG_KEYS } from "./schema";
 import { buildQueryPlan, type PlaceDict, type QueryVariant } from "./searchQuery";
+import { buildTermIndex, suggestTerms, type TermHit } from "./searchTerms";
 import {
   DEFAULT_SHARE_CODE,
   FOCUS_CITIES,
@@ -396,6 +397,39 @@ export async function getPlaceDict(): Promise<PlaceDict> {
   };
   placeDictCache = { at: Date.now(), value };
   return value;
+}
+
+/**
+ * 联想词表：整库扫一遍抽出地名碎片，进程内缓存 30 分钟。
+ *
+ * 为什么不落一张表：数据量只有 8.4k 行，扫一次几十毫秒，
+ * 而落表就要多一条「导数据之后记得重建」的运维规矩——忘了就是联想词永远是旧的。
+ */
+let termIndexCache: { at: number; index: Map<string, number> } | null = null;
+const TERM_INDEX_TTL = 30 * 60 * 1000;
+
+async function getTermIndex(): Promise<Map<string, number>> {
+  if (termIndexCache && Date.now() - termIndexCache.at < TERM_INDEX_TTL) {
+    return termIndexCache.index;
+  }
+  await ensureSchema();
+  const res = await db.execute("SELECT name, keywords, address, district, city FROM car_parks");
+  const index = buildTermIndex(
+    res.rows.map((row) => ({
+      name: str(row.name),
+      keywords: str(row.keywords),
+      address: str(row.address),
+      district: str(row.district),
+      city: str(row.city),
+    })),
+  );
+  termIndexCache = { at: Date.now(), index };
+  return index;
+}
+
+/** 输入联想：只回库里真实存在的叫法，附带「有几个车场」 */
+export async function suggestSearchTerms(q: string, limit = 6): Promise<TermHit[]> {
+  return suggestTerms(await getTermIndex(), q, limit);
 }
 
 /**
