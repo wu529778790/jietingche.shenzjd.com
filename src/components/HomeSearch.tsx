@@ -1,10 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import dynamic from "next/dynamic";
 import { BrandPin } from "@/components/BrandMark";
-import FilterSheet, { type FilterValues } from "@/components/FilterSheet";
-import LocationSheet from "@/components/LocationSheet";
-import PackageSheet from "@/components/PackageSheet";
+import type { FilterValues } from "@/components/FilterSheet";
 import { beacon } from "@/lib/beacon";
 import {
   SORT_OPTIONS,
@@ -31,6 +30,17 @@ interface Facets {
 
 const PAGE_SIZE = 20;
 const EMPTY_FACETS: Facets = { cities: [], districts: [], industries: [], types: [], slots: [] };
+
+/**
+ * 三个弹层按需加载。
+ *
+ * 它们都是「点了才渲染」的：位置、筛选、套餐详情。静态导入会白白塞进首屏 bundle——
+ * PackageSheet 还牵着 lib/qr（qrcode-generator 整库），可绝大多数人首屏根本不出码。
+ * 拆出去以后首屏只留搜索列表，弹层代码在空闲时才预取（见下面的 useEffect）。
+ */
+const LocationSheet = dynamic(() => import("@/components/LocationSheet"), { ssr: false });
+const FilterSheet = dynamic(() => import("@/components/FilterSheet"), { ssr: false });
+const PackageSheet = dynamic(() => import("@/components/PackageSheet"), { ssr: false });
 
 /** 定位结果缓存 30 分钟，同一个标签页内反复进来不再弹权限、也不再闪一次“推荐”排序 */
 const GEO_CACHE_KEY = "jtc:geo";
@@ -304,6 +314,21 @@ export default function HomeSearch() {
     },
     [resolveCity],
   );
+
+  /**
+   * 空闲时把三个弹层预取进来：首屏不抢带宽，用户点「位置 / 筛选 / 办理」时
+   * 代码已经躺在浏览器缓存里，不会先闪一下空白再弹出来。
+   * 2.5 秒是估的——首屏请求基本都在这个时间之内完成，再晚就失去预热的意义。
+   */
+  useEffect(() => {
+    const warm = () => {
+      void import("@/components/LocationSheet");
+      void import("@/components/FilterSheet");
+      void import("@/components/PackageSheet");
+    };
+    const timer = setTimeout(warm, 2500);
+    return () => clearTimeout(timer);
+  }, []);
 
   // 进来先按默认条件出内容，定位有结果后再刷新一版附近的
   useEffect(() => {
