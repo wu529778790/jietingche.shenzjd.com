@@ -26,7 +26,7 @@ import {
   parkPath,
   SITE_NAME,
 } from "@/lib/seo";
-import { monthlyPrice, tidyRuleSummary, yuan } from "@/lib/types";
+import { formatDistance, monthlyPrice, tidyRuleSummary, yuan } from "@/lib/types";
 
 interface PageProps {
   params: Promise<{ code: string }>;
@@ -44,7 +44,15 @@ const loadParkPage = cache(async (code: string) => {
   if (!park) return null;
   const [packages, nearby, config, benchmark] = await Promise.all([
     listParkPackages(park.id),
-    listNearbyParks(park.city, park.district, park.id, 8),
+    // 按车场自身坐标排（区界上也不会推荐到 5 公里外的同区车场）
+    listNearbyParks({
+      city: park.city,
+      district: park.district,
+      excludeId: park.id,
+      lat: park.lat,
+      lng: park.lng,
+      limit: 8,
+    }),
     getPublicConfig(),
     getDistrictMonthlyBenchmark(park.city, park.district),
   ]);
@@ -367,12 +375,18 @@ export default async function ParkPage({ params }: PageProps) {
       {nearby.length ? (
         <section className="card p-4" aria-labelledby="nearby-title">
           <h2 id="nearby-title" className="text-sm font-semibold">
-            附近还有这些车场
+            附近还有这些能办月卡的车场
           </h2>
           <ul className="mt-2 space-y-1.5 text-xs">
             {nearby.map((item) => (
               <li key={item.id}>
                 <Link href={parkPath(item.parkCode)} className="hover:text-brand">
+                  {/* 距离写在名字前面：这一栏是按远近排的，不标距离用户看不出排序依据 */}
+                  {typeof item.distance === "number" && item.distance > 0 ? (
+                    <span className="mr-1.5 tabular-nums text-muted">
+                      {formatDistance(item.distance)}
+                    </span>
+                  ) : null}
                   {item.name}
                   {item.minMonthly > 0 ? (
                     <span className="ml-1 text-muted">

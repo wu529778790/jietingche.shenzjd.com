@@ -16,7 +16,7 @@ import {
   cleanRuleSummary,
   monthlyPrice,
 } from "./packageText";
-import type { CarPark, Package } from "./types";
+import { distanceMeters, type CarPark, type Package } from "./types";
 
 const LONG_TERM_TYPE_SQL = "'月卡','季卡','半年卡','年卡'";
 const PLACEHOLDER_WORDS = ["定金", "订金", "占位", "测试", "补差"];
@@ -46,6 +46,8 @@ export interface ParkSummary {
   audience: string;
   minMonthly: number;
   packageCount: number;
+  /** 只有「按距离排」的场景才有，单位米 */
+  distance?: number;
 }
 
 export interface DistrictStat {
@@ -275,14 +277,73 @@ export async function getDistrictMonthlyBenchmark(
   };
 }
 
-/** 车场页的内链：同区优先，不够再补同城 */
-export async function listNearbyParks(
-  city: string,
-  district: string,
-  excludeId: string,
-  limit = 8,
-): Promise<ParkSummary[]> {
+export interface NearbyParksInput {
+  city: string;
+  district: string;
+  excludeId: string;
+  limit?: number;
+  /**
+   * 当前车场坐标。有它就按直线距离排，没有才退回「同区优先」的文本逻辑。
+   *
+   * 为什么必须按距离：区的边界和人的距离感无关。车场刚好在区界上时，
+   * 「同区优先」会把 5 公里外的同区车场排在 200 米外的邻区车场前面——
+   * 而用户看到的应该是「走得到的那几个」。
+   */
+  lat?: number;
+  lng?: number;
+  /** 第一档半径（km）；这一档一条都没有才放开放到 10km */
+  radiusKm?: number;
+}
+
+/** 车场页的内链：默认按直线距离排，没有坐标时退回「同区优先、再比价」 */
+export async function listNearbyParks(input: NearbyParksInput): Promise<ParkSummary[]> {
+  const { city, district, excludeId } = input;
+  const limit = Math.min(20, Math.max(1, Math.floor(input.limit ?? 8)));
+  const lat = input.lat ?? 0;
+  const lng = input.lng ?? 0;
+  const hasGeo = Number.isFinite(lat) && Number.isFinite(lng) && (lat !== 0 || lng !== 0);
+
   await ensureSchema();
+
+  if (hasGeo) {
+    const cosLat = Math.cos((lat * Math.PI) / 180) ** 2 || 1;
+    /** 距离平方（度²）：只用来比大小，不用开方 */
+    const dist2 = "(((c.lat - ?) * (c.lat - ?)) + ((c.lng - ?) * (c.lng - ?)) * ?)";
+    const geoArgs = [lat, lat, lng, lng, cosLat];
+    const radii = [Math.max(0.5, input.radiusKm ?? 3), 10];
+
+    for (const km of radii) {
+      const deg2 = (km / 111.32) ** 2;
+      const res = await db.execute({
+        sql: `SELECT c.id, c.park_code, c.name, c.city, c.district, c.area, c.address, c.industry, c.audience,
+                     c.lat, c.lng,
+                     COUNT(k.id) AS package_count, ${MIN_MONTHLY} AS min_monthly,
+                     ${dist2} AS dist2
+              FROM car_parks c JOIN packages k ON k.park_id = c.id
+              WHERE c.id <> ? AND ${ACTIVE_PACKAGE}
+                    AND c.lat IS NOT NULL AND c.lng IS NOT NULL
+                    AND ${dist2} <= ?
+              GROUP BY c.id
+              ORDER BY ${dist2} ASC, COALESCE(${LONG_TERM_MONTHLY}, 2147483647) ASC, c.name ASC
+              LIMIT ?`,
+        args: [...geoArgs, excludeId, ...geoArgs, deg2, ...geoArgs, limit],
+      });
+      if (!res.rows.length) continue;
+      return res.rows.map((row) => {
+        const summary = toParkSummary(row);
+        const rowLat = num(row.lat);
+        const rowLng = num(row.lng);
+        // 行里没带坐标时用它自带的 dist2 反推：1 度纬度 ≈ 111.32km，横向已按 cos 缩放
+        const meters =
+          rowLat && rowLng
+            ? distanceMeters(lat, lng, rowLat, rowLng)
+            : Math.sqrt(Math.max(0, num(row.dist2))) * 111_320;
+        return { ...summary, distance: meters };
+      });
+    }
+    return [];
+  }
+
   const res = await db.execute({
     sql: `SELECT c.id, c.park_code, c.name, c.city, c.district, c.area, c.address, c.industry, c.audience,
                  COUNT(k.id) AS package_count, ${MIN_MONTHLY} AS min_monthly
