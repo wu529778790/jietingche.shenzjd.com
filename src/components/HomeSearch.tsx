@@ -31,12 +31,14 @@ const PAGE_SIZE = 20;
 const NEARBY_TRIGGER_TOTAL = 5;
 const EMPTY_FACETS: Facets = { cities: [], districts: [], industries: [], types: [], slots: [] };
 
-/** 「附近还有」这一段的数据：锚点是用户搜到的第一个车场 */
+/** 「附近还有」这一段的数据：锚点是用户搜到的第一个车场，或者他自己的位置 */
 interface NearbyBlock {
   parks: ParkWithPackages[];
-  /** 锚点车场名，标题里要写清「以谁为中心」，否则用户不知道这些距离是从哪儿算的 */
+  /** 锚点名，标题里要写清「以谁为中心」，否则用户不知道这些距离是从哪儿算的 */
   anchor: string;
   radiusKm: number;
+  /** few = 命中太少补周边；none = 一条没命中，用定位兜底 */
+  reason: "few" | "none";
 }
 
 /**
@@ -195,37 +197,48 @@ export default function HomeSearch() {
    * 只用来补结果很少的情况：结果多的时候列表本身已经覆盖这片区域，
    * 再挂一段周边会让人以为下面还有一批更近的。
    */
-  const loadNearby = useCallback(async (list: ParkWithPackages[], id: number) => {
-    const anchor = list.find((park) => park.lat && park.lng);
-    if (!anchor) {
-      setNearby(null);
-      return;
-    }
-    const params = new URLSearchParams({
-      lat: String(roundCoord(anchor.lat)),
-      lng: String(roundCoord(anchor.lng)),
-      limit: "8",
-      // 已经出现在列表里的别再重复一遍；只带前 10 个，URL 太长会让 CDN 无法复用
-      exclude: list
-        .slice(0, 10)
-        .map((park) => park.id)
-        .join(","),
-    });
-    try {
-      const res = await fetch(`/api/nearby?${params.toString()}`);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const json = await res.json();
-      if (reqId.current !== id) return;
-      const nearbyParks: ParkWithPackages[] = json?.data ?? [];
-      setNearby(
-        nearbyParks.length
-          ? { parks: nearbyParks, anchor: anchor.name, radiusKm: Number(json?.radiusKm) || 3 }
-          : null,
-      );
-    } catch {
-      if (reqId.current === id) setNearby(null);
-    }
-  }, []);
+  const loadNearby = useCallback(
+    async (
+      target: {
+        lat: number;
+        lng: number;
+        /** 锚点名。结果太少时是「命中的那个车场」，0 结果时是「你附近」 */
+        anchor: string;
+        reason: "few" | "none";
+        /** 已经出现在列表里的车场，别再重复一遍 */
+        exclude?: string[];
+      },
+      id: number,
+    ) => {
+      const params = new URLSearchParams({
+        lat: String(roundCoord(target.lat)),
+        lng: String(roundCoord(target.lng)),
+        limit: "8",
+        // 只带前 10 个，URL 太长会让 CDN 无法复用
+        exclude: (target.exclude ?? []).slice(0, 10).join(","),
+      });
+      try {
+        const res = await fetch(`/api/nearby?${params.toString()}`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const json = await res.json();
+        if (reqId.current !== id) return;
+        const nearbyParks: ParkWithPackages[] = json?.data ?? [];
+        setNearby(
+          nearbyParks.length
+            ? {
+                parks: nearbyParks,
+                anchor: target.anchor,
+                radiusKm: Number(json?.radiusKm) || 3,
+                reason: target.reason,
+              }
+            : null,
+        );
+      } catch {
+        if (reqId.current === id) setNearby(null);
+      }
+    },
+    [],
+  );
 
   const fetchList = useCallback(
     async (targetPage: number, append: boolean) => {
@@ -274,9 +287,27 @@ export default function HomeSearch() {
         if (!append) {
           const hits = json?.total ?? list.length;
           setFallbackQuery(typeof json?.fallbackQuery === "string" ? json.fallbackQuery : "");
-          // 命中太少说明用户找的那个地方附近我们没收录，拿第一个车场当锚点补一段周边
-          if (list.length && hits > 0 && hits <= NEARBY_TRIGGER_TOTAL) {
-            void loadNearby(list, id);
+          const anchorPark = list.find((park) => park.lat && park.lng);
+          if (anchorPark && hits <= NEARBY_TRIGGER_TOTAL) {
+            // 命中太少：用户找的那个地方附近我们没收录，拿第一个车场当锚点补一段周边
+            void loadNearby(
+              {
+                lat: anchorPark.lat,
+                lng: anchorPark.lng,
+                anchor: anchorPark.name,
+                reason: "few",
+                exclude: list.map((park) => park.id),
+              },
+              id,
+            );
+          } else if (!list.length && coords && keyword.trim()) {
+            // 一条没命中（「海岸城」「壹方城」这类商圈名库里没有）：用他本人的位置兜底。
+            // 搜这个地名的人大概率就在它附近，附近能办月卡的车场就是他要的答案。
+            // 只在有关键词时做：纯筛选筛空了是条件太严，给「你附近的车场」等于答非所问。
+            void loadNearby(
+              { lat: coords.lat, lng: coords.lng, anchor: "你所在的位置", reason: "none" },
+              id,
+            );
           } else {
             setNearby(null);
           }
@@ -483,6 +514,25 @@ export default function HomeSearch() {
     setMaxPrice(next.maxPrice);
   }
 
+  /**
+   * 0 结果页的出路一：清掉关键词，按当前位置重新出列表。
+   * 库里没有商圈名，但「他人在哪儿」这件事我们是知道的，这也是唯一不依赖外部
+   * 地理编码就能把「海岸城」这类输入救回来的办法。
+   */
+  function searchNearMe() {
+    skipGeo();
+    setKeyword("");
+    setDistrict("");
+    locate(true);
+  }
+
+  /** 出路二：清掉关键词，看当前选择的城市（没选就是全国推荐位） */
+  function showWholeCity() {
+    skipGeo();
+    setKeyword("");
+    setDistrict("");
+  }
+
   function resetAll() {
     skipGeo();
     setKeyword("");
@@ -525,7 +575,7 @@ export default function HomeSearch() {
               setKeyword(e.currentTarget.value);
               setImeOpen(false);
             }}
-            placeholder="搜车场名、商圈、地铁站，如：科技园 / 万象城"
+            placeholder="搜车场名、楼宇或小区名，如：科技园 / 侨城坊"
             autoComplete="off"
             className="w-full rounded-xl border border-white/40 bg-white px-3.5 py-3 text-sm text-foreground placeholder:text-muted focus:outline-none"
           />
@@ -605,10 +655,46 @@ export default function HomeSearch() {
         </div>
       ) : null}
 
-      {!loading && parks.length === 0 ? (
-        <div className="card p-8 text-center text-sm text-muted">
-          没找到符合条件的车场
-          <div className="mt-1 text-xs">换个关键词，或放宽业态 / 时段 / 价格试试</div>
+      {/* 一条都没找到时不能只写「没找到」：库里根本没有商圈名，光让用户「换个词」等于让他猜 */}
+      {!loading && parks.length === 0 && !nearby ? (
+        <div className="card p-6 text-center">
+          <div className="text-sm font-medium">没找到匹配的车场</div>
+          <div className="mt-1.5 text-xs leading-relaxed text-muted">
+            {keyword.trim() ? (
+              <>
+                站里收录的是具体车场、楼宇和小区名，
+                <br />
+                商圈名这类叫法大多查不到。换个楼宇 / 小区 / 路名试试，或者直接按位置看。
+              </>
+            ) : (
+              <>当前筛选条件下没有车场，放宽业态 / 时段 / 价格试试。</>
+            )}
+          </div>
+          <div className="mt-3 flex flex-wrap justify-center gap-2">
+            {keyword.trim() ? (
+              <button
+                onClick={searchNearMe}
+                className="rounded-lg bg-brand px-3 py-1.5 text-xs font-medium text-white"
+              >
+                按我的位置找附近
+              </button>
+            ) : (
+              <button
+                onClick={resetAll}
+                className="rounded-lg bg-brand px-3 py-1.5 text-xs font-medium text-white"
+              >
+                清空筛选
+              </button>
+            )}
+            {keyword.trim() ? (
+              <button
+                onClick={showWholeCity}
+                className="rounded-lg border border-border px-3 py-1.5 text-xs"
+              >
+                看{city ? city.replace(/市$/, "") : "全部"}车场
+              </button>
+            ) : null}
+          </div>
         </div>
       ) : null}
 
@@ -625,29 +711,6 @@ export default function HomeSearch() {
           <ParkCard key={park.id} park={park} onPick={(picked, pkg) => setActive({ park: picked, pkg })} />
         ))}
       </div>
-
-      {/* 命中太少时补一段周边：用户搜的是一个具体地点，选择不该只有一条 */}
-      {nearby ? (
-        <section className="space-y-2 pt-1" aria-labelledby="nearby-title">
-          <div className="flex items-baseline justify-between gap-2 px-1">
-            <h2 id="nearby-title" className="text-sm font-semibold">
-              附近还有 {nearby.parks.length} 个能办月卡的
-            </h2>
-            <span className="shrink-0 text-[11px] text-muted">
-              以「{nearby.anchor}」为中心 · {nearby.radiusKm}km 内
-            </span>
-          </div>
-          <div className="space-y-3">
-            {nearby.parks.map((park) => (
-              <ParkCard
-                key={park.id}
-                park={park}
-                onPick={(picked, pkg) => setActive({ park: picked, pkg })}
-              />
-            ))}
-          </div>
-        </section>
-      ) : null}
 
       {hasMore ? (
         <div ref={loadMoreRef} className="py-3 text-center text-xs text-muted">
@@ -669,6 +732,34 @@ export default function HomeSearch() {
         </div>
       ) : parks.length > 0 ? (
         <div className="py-3 text-center text-[11px] text-muted">没有更多了</div>
+      ) : null}
+
+      {/* 命中太少补周边；一条没命中就用定位兜底——搜「海岸城」的人多半就在它附近。
+          放在列表底部而不是中间：主结果是用户要找的那个车场，周边是备选，不能抢在它前面 */}
+      {nearby ? (
+        <section className="space-y-2 pt-1" aria-labelledby="nearby-title">
+          <div className="px-1">
+            <h2 id="nearby-title" className="text-sm font-semibold leading-snug">
+              {nearby.reason === "none"
+                ? `「${keyword.trim()}」没查到，你附近有 ${nearby.parks.length} 个能办月卡的`
+                : `附近还有 ${nearby.parks.length} 个能办月卡的`}
+            </h2>
+            <div className="mt-0.5 text-[11px] text-muted">
+              {nearby.reason === "none"
+                ? `按你的位置排 · ${nearby.radiusKm}km 内`
+                : `以「${nearby.anchor}」为中心 · ${nearby.radiusKm}km 内`}
+            </div>
+          </div>
+          <div className="space-y-3">
+            {nearby.parks.map((park) => (
+              <ParkCard
+                key={park.id}
+                park={park}
+                onPick={(picked, pkg) => setActive({ park: picked, pkg })}
+              />
+            ))}
+          </div>
+        </section>
       ) : null}
 
       {locationOpen ? (
