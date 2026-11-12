@@ -96,8 +96,17 @@ export default function HomeSearch() {
   const [sort, setSort] = useState<string>("recommend");
 
   const [coords, setCoords] = useState<Coords | null>(null);
-  const [geoState, setGeoState] = useState<"idle" | "locating" | "error">("idle");
+  /**
+   * boot = 还没判断（首帧）、locating = 等定位、idle = 有结果、error = 没拿到。
+   *
+   * 为什么要 boot 这一档：以前首屏先发一趟「没有城市」的请求，用户会看到一堆
+   * 外地车场，等定位回来再整个换掉，列表硬跳一下。现在定位没定下来之前只出骨架屏，
+   * 一次请求都不发——省一次全国查询，也不会先给错答案。
+   */
+  const [geoState, setGeoState] = useState<"boot" | "locating" | "idle" | "error">("boot");
   const [geoError, setGeoError] = useState("");
+  /** 等待定位期间用户自己动手了（打字/选城市/改筛选），就不再等，立刻出结果 */
+  const geoAborted = useRef(false);
 
   const [facets, setFacets] = useState<Facets>(EMPTY_FACETS);
   /** 切城市后区域还在拉取：位置弹层用骨架屏占位，别让区域块突然空一块 */
@@ -222,13 +231,19 @@ export default function HomeSearch() {
     [keyword, city, district, industry, type, slot, maxPrice, sort, coords],
   );
 
-  // 不等定位：条件一变就先出结果，定位回来再刷新一次
+  /**
+   * 定位没定下来之前不出列表：骨架屏顶着，一次请求都不发。
+   * 用户自己动手了（skipGeo 会把状态挪出 boot/locating）就立刻放行。
+   */
+  const geoWaiting = geoState === "boot" || geoState === "locating";
+
   useEffect(() => {
+    if (geoWaiting) return;
     const timer = setTimeout(() => {
       fetchList(1, false);
     }, 250);
     return () => clearTimeout(timer);
-  }, [fetchList]);
+  }, [fetchList, geoWaiting]);
 
   const hasMore = !exhausted && parks.length > 0 && parks.length < total;
 
@@ -265,8 +280,17 @@ export default function HomeSearch() {
     }
   }, []);
 
+  /** 用户自己动手了：不再等定位，立刻放行列表请求（定位回调也会被丢掉） */
+  const skipGeo = useCallback(() => {
+    if (geoAborted.current) return;
+    geoAborted.current = true;
+    setGeoState((prev) => (prev === "boot" || prev === "locating" ? "idle" : prev));
+  }, []);
+
   const locate = useCallback(
     (force = false) => {
+      // 用户已经自己动手了（跳过了定位），这一趟自动定位就别再跑，免得又把列表卡住
+      if (!force && geoAborted.current) return;
       // 刚定位过就直接复用，既不弹权限也不让列表抖一下；force 只用来跳过缓存
       const cached = force ? null : readGeoCache();
       if (cached) {
@@ -275,6 +299,7 @@ export default function HomeSearch() {
           setCity(cached.city);
           setDistrict("");
         }
+        setGeoState("idle");
         return;
       }
       if (typeof navigator === "undefined" || !navigator.geolocation) {
@@ -282,10 +307,13 @@ export default function HomeSearch() {
         setGeoError("当前浏览器不支持定位，直接选城市吧");
         return;
       }
+      // 重新定位（用户点重试）：上一轮已经放弃过，这里要重新允许回调生效
+      geoAborted.current = false;
       setGeoState("locating");
       setGeoError("");
       navigator.geolocation.getCurrentPosition(
         async (pos) => {
+          if (geoAborted.current) return;
           const next = {
             lat: roundCoord(pos.coords.latitude),
             lng: roundCoord(pos.coords.longitude),
@@ -293,6 +321,7 @@ export default function HomeSearch() {
           writeGeoCache(next);
           // 先反查城市再一次性写回坐标，避免「坐标变一次、城市变一次」连跳两次
           const hit = await resolveCity(next);
+          if (geoAborted.current) return;
           geoRefresh.current = true;
           if (hit && !cityTouched.current) {
             setCity(hit);
@@ -302,10 +331,11 @@ export default function HomeSearch() {
           setGeoState("idle");
         },
         (err) => {
+          if (geoAborted.current) return;
           setGeoState("error");
           setGeoError(
             err.code === err.PERMISSION_DENIED
-              ? "定位权限被拒绝了，手动选城市吧"
+              ? "定位权限被拒绝了，下面先按全国排；点「位置」选个城市更准"
               : "没拿到你的位置，点这里重试或手动选城市",
           );
         },
@@ -330,7 +360,7 @@ export default function HomeSearch() {
     return () => clearTimeout(timer);
   }, []);
 
-  // 进来先按默认条件出内容，定位有结果后再刷新一版附近的
+  // 进来先问定位：等它定下来（或用户自己动手）才出第一版列表，避免先给全国再换成附近
   useEffect(() => {
     // 放到下一个 tick，让首屏先渲染出来，权限弹窗不至于卡住白屏
     const kick = setTimeout(locate, 0);
@@ -344,14 +374,22 @@ export default function HomeSearch() {
 
   /** 「位置」弹层里选城市：切城市要顺手清掉区域，不然会筛出空结果 */
   function chooseCity(name: string) {
+    skipGeo();
     cityTouched.current = true;
     if (name !== city) setDistrictsLoading(true);
     setCity(name);
     setDistrict("");
   }
 
+  /** 只选区不换城市：同样算用户自己动手，别再等定位 */
+  function chooseDistrict(name: string) {
+    skipGeo();
+    setDistrict(name);
+  }
+
   /** 面板里点了「确定」才写回这些条件 */
   function applyFilters(next: FilterValues) {
+    skipGeo();
     setIndustry(next.industry);
     setType(next.type);
     setSlot(next.slot);
@@ -359,6 +397,7 @@ export default function HomeSearch() {
   }
 
   function resetAll() {
+    skipGeo();
     setKeyword("");
     cityTouched.current = false;
     setCity("");
@@ -388,7 +427,10 @@ export default function HomeSearch() {
         <div className="mt-3">
           <input
             value={keyword}
-            onChange={(e) => setKeyword(e.target.value)}
+            onChange={(e) => {
+              skipGeo();
+              setKeyword(e.target.value);
+            }}
             placeholder="搜车场名、商圈、地铁站，如：科技园 / 万象城"
             autoComplete="off"
             className="w-full rounded-xl border border-white/40 bg-white px-3.5 py-3 text-sm text-foreground placeholder:text-muted focus:outline-none"
@@ -436,7 +478,10 @@ export default function HomeSearch() {
             key={option.value}
             type="button"
             disabled={option.value === "distance" && !coords}
-            onClick={() => setSort(option.value)}
+            onClick={() => {
+              skipGeo();
+              setSort(option.value);
+            }}
             className={`filter-pill ${sort === option.value ? "is-active" : ""} disabled:cursor-not-allowed disabled:opacity-40`}
           >
             {option.label}
@@ -572,7 +617,7 @@ export default function HomeSearch() {
           districts={facets.districts.map((item) => item.name)}
           districtsLoading={districtsLoading}
           onPickCity={chooseCity}
-          onPickDistrict={setDistrict}
+          onPickDistrict={chooseDistrict}
           onClose={() => setLocationOpen(false)}
         />
       ) : null}
