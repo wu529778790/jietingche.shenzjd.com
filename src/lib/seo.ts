@@ -5,7 +5,13 @@
  * 短、稳定、可读；城市/区域直接用中文段，百度/Google 都认，且和用户搜索词一致。
  */
 
-export const SITE_NAME = "找停车";
+export const SITE_NAME = "泊月";
+
+/** 站点一句话定位，标题栏、OG 图、页头副标题共用 */
+export const SITE_TAGLINE = "停车月卡比价";
+
+/** 1200×630 分享图，源文件见 scripts/brand/og-card.html */
+export const OG_IMAGE = "/og.png";
 
 /** 线上域名。构建期没有环境变量时兜底到生产域名，避免 canonical 指向 localhost */
 export const SITE_URL = (

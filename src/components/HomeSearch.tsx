@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { BrandPin } from "@/components/BrandMark";
 import FilterSheet, { type FilterValues } from "@/components/FilterSheet";
 import LocationSheet from "@/components/LocationSheet";
 import PackageSheet from "@/components/PackageSheet";
@@ -346,8 +347,18 @@ export default function HomeSearch() {
 
   return (
     <div className="space-y-3">
-      <section className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-[#1b6bff] to-[#0d3fb0] px-4 pb-4 pt-5 text-white">
-        <div className="text-[19px] font-semibold leading-tight">找停车月卡，比临停便宜一半</div>
+      <section className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-[#1b6bff] to-[#0d3fb0] px-4 pb-4 pt-4 text-white">
+        {/* 品牌不占独立一行——首屏高度要给搜索结果，锁在一行里最省 */}
+        <div className="flex items-center gap-1.5">
+          <BrandPin className="h-5 w-5 shrink-0" />
+          <span className="text-[15px] font-semibold leading-none tracking-[0.18em]">泊月</span>
+          <span className="ml-0.5 rounded-full bg-white/15 px-1.5 py-0.5 text-[10px] leading-none text-white/85">
+            停车月卡比价
+          </span>
+        </div>
+        <h1 className="mt-2.5 text-[19px] font-semibold leading-tight">
+          停车月卡比临停便宜一半
+        </h1>
         <div className="mt-1 text-xs text-white/80">
           根据你的位置和需求挑车场，选好套餐扫码就能办
         </div>

@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128" role="img" aria-label="泊月">
+  <defs>
+    <linearGradient id="c" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#1b6bff"/>
+      <stop offset="1" stop-color="#0d3fb0"/>
+    </linearGradient>
+  </defs>
+  <rect width="128" height="128" rx="28" fill="url(#c)"/>
+  <path fill="#ffffff" d="M64 22 c-17 0 -30 13 -30 29 c0 21 30 55 30 55 s30 -34 30 -55 c0 -16 -13 -29 -30 -29 Z"/>
+  <path d="M55 75 V45 H65 a11 11 0 0 1 0 22 H55" fill="none" stroke="#0d3fb0"
+    stroke-width="10" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

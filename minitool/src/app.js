@@ -1,4 +1,4 @@
-/* 找停车·小红书小工具 v2
+/* 泊月·小红书小工具 v2
  * ES2017（Chrome 61 基线），无外部依赖，经典脚本（无 import/export）。
  * 平台 API 调用前先做方法存在性检测 + buildVersion 版本门禁（js-api.md 规范）：
  *   getLocation 9.49+ / saveImageToPhotosAlbum 9.42+，低版本走降级提示。

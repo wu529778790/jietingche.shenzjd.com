@@ -1,6 +1,7 @@
-# 找停车（jietingche）
+# 泊月（jietingche）
 
-按位置和需求找停车场优惠套餐（月卡 / 季卡 / 夜间包月…），选好套餐直接扫码办理。
+站点名「泊月」，停车月卡比价。按位置和需求找停车场优惠套餐（月卡 / 季卡 / 夜间包月…），
+选好套餐直接扫码办理。
 数据来自捷停车分销选品池。访客链路：**首页搜索 → 城市/区域/车场落地页 → 出码**，
 落地页全部服务端渲染，专门给搜索引擎和分享落地用（见「SEO / 落地页」）。
 管理端全部收在 `/admin/*`，需要口令才能进，前台没有任何入口暴露它们。
@@ -130,6 +131,18 @@ npm run toy -- --snapshot data/jtc-snapshot.json        # B站 Toy → platforms
 | `/admin/parks` | 后台 | 车场库：维护车场与套餐（码不在这里配） |
 | `/admin/logs` | 后台 | 投放台账 |
 | `/admin/stats` | 后台 | 对账（浏览/下单/佣金） |
+
+## 品牌
+
+站名「泊月」，图标是一枚定位针里嵌 P（对应「按位置找车场」这个核心动作）。
+
+- `src/app/icon.svg` —— favicon / 标签页图标，路径数据是唯一源；
+- `src/app/apple-icon.png` —— iOS 桌面图标 180×180，满方不切角（圆角由系统切）；
+- `public/og.png` —— 1200×630 分享图，`layout.tsx` 里挂成 og:image / twitter:image；
+- `src/components/BrandMark.tsx` —— 页面内联用的两版图形（带底板 / 只留针）。
+
+改图形或改分享图文案要三处同步：`icon.svg`、`scripts/brand/og-card.html`（出图源文件）、
+`BrandMark.tsx`。重新出图的命令写在 `og-card.html` 顶部注释里。
 
 ## SEO / 落地页
 

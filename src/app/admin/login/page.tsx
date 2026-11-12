@@ -63,7 +63,7 @@ export default function AdminLoginPage() {
         </form>
       </div>
       <Link href="/" className="mt-3 text-center text-xs text-muted">
-        返回前台找停车
+        返回泊月首页
       </Link>
     </div>
   );

@@ -1,17 +1,20 @@
 import type { Metadata, Viewport } from "next";
 import type { ReactNode } from "react";
-import { SITE_NAME, SITE_URL } from "@/lib/seo";
+import { OG_IMAGE, SITE_NAME, SITE_TAGLINE, SITE_URL } from "@/lib/seo";
 import "./globals.css";
+
+const TITLE_DEFAULT = `${SITE_NAME} · ${SITE_TAGLINE}，车场月卡秒查`;
+const DESCRIPTION =
+  "按月价对比 7816 个车场的月卡、季卡、夜间套餐，按位置和需求筛，选好套餐扫码直接在捷停车官方小程序办理。";
 
 export const metadata: Metadata = {
   // 所有相对 canonical / og:url 都以线上域名为准，避免构建期解析成 localhost
   metadataBase: new URL(SITE_URL),
   title: {
-    default: "找停车优惠 · 车场月卡秒查",
+    default: TITLE_DEFAULT,
     template: `%s｜${SITE_NAME}`,
   },
-  description:
-    "按位置和需求找停车场月卡、季卡、夜间套餐，按折合月价对比，选好套餐扫码直接在捷停车官方小程序办理。",
+  description: DESCRIPTION,
   keywords: [
     "停车月卡",
     "停车场月租",
@@ -25,10 +28,24 @@ export const metadata: Metadata = {
   openGraph: {
     type: "website",
     siteName: SITE_NAME,
-    title: "找停车优惠 · 车场月卡秒查",
-    description:
-      "按位置和需求找停车场月卡、季卡、夜间套餐，按折合月价对比，扫码直接在官方小程序办理。",
+    locale: "zh_CN",
+    title: TITLE_DEFAULT,
+    description: DESCRIPTION,
     url: SITE_URL,
+    images: [
+      {
+        url: OG_IMAGE,
+        width: 1200,
+        height: 630,
+        alt: `${SITE_NAME} · ${SITE_TAGLINE}`,
+      },
+    ],
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: TITLE_DEFAULT,
+    description: DESCRIPTION,
+    images: [OG_IMAGE],
   },
   robots: { index: true, follow: true },
 };
@@ -37,6 +54,8 @@ export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
   maximumScale: 1,
+  // 和图标、页头同一个品牌蓝，安卓 Chrome 地址栏跟着变
+  themeColor: "#1b6bff",
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {

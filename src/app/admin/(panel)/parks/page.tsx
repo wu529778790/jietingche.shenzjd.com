@@ -284,7 +284,7 @@ export default function ParksPage() {
         <div className="card p-6 text-center text-sm text-muted">
           {keyword || onlyMissing ? "没搜到符合条件的车场，换个关键词试试" : "车场库还是空的"}
           <Link href="/" className="ml-1 text-brand">
-            去找停车
+            去前台看看
           </Link>
         </div>
       ) : null}

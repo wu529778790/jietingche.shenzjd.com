@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, type ReactNode } from "react";
+import BrandMark from "@/components/BrandMark";
 import { ADMIN_UNAUTHORIZED_EVENT } from "@/lib/adminClient";
 
 const TABS = [
@@ -32,7 +33,10 @@ export default function AdminPanelLayout({ children }: { children: ReactNode }) 
     <>
       <header className="sticky top-0 z-30 -mx-3 mb-3 border-b border-border bg-card/90 px-3 backdrop-blur">
         <div className="flex w-full items-center gap-1 py-2">
-          <div className="mr-2 hidden text-sm font-semibold sm:block">管理后台</div>
+          <div className="mr-2 flex items-center gap-1.5">
+            <BrandMark className="h-6 w-6 shrink-0" />
+            <span className="hidden text-sm font-semibold sm:block">泊月 · 管理后台</span>
+          </div>
           {TABS.map((tab) => (
             <Link
               key={tab.href}

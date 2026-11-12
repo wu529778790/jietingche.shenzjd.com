@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<title>泊月 · 品牌出图（OG / apple-icon）</title>
+<!--
+  出图源文件。改完文案或配色后重新生成两张图：
+
+    #og      → public/og.png         1200×630 分享图（微信/微博/X 卡片）
+    #apple   → src/app/apple-icon.png 180×180 iOS 桌面图标（不切圆角，系统会自己切）
+
+  重现方式二选一：
+  1) 浏览器打开本文件，DevTools 里对对应元素右键「Capture node screenshot」；
+  2) Playwright / puppeteer 里对元素截图：
+       await page.locator('#og').screenshot({ path: 'public/og.png' });
+       await page.locator('#apple').screenshot({ path: 'src/app/apple-icon.png' });
+
+  图形本身的唯一源是 src/app/icon.svg（favicon / 页面内联都用同一份路径数据），
+  本文件里的 SVG 是它的内联副本——改了图标记得三处（icon.svg / 本文件 / BrandMark.tsx）同步。
+-->
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #fff; font-family: -apple-system, "PingFang SC", sans-serif; }
+
+  /* iOS 桌面图标：正方形铺满，圆角交给系统 */
+  #apple {
+    width: 180px; height: 180px;
+    background: linear-gradient(135deg, #1b6bff 0%, #0d3fb0 100%);
+    display: flex; align-items: center; justify-content: center;
+  }
+  #apple svg { width: 118px; height: 118px; }
+
+  #og {
+    width: 1200px; height: 630px; position: relative; overflow: hidden;
+    background: linear-gradient(135deg, #1b6bff 0%, #0d3fb0 100%);
+    color: #fff; display: flex; flex-direction: column; justify-content: center;
+    padding: 0 88px;
+  }
+  #og .brand { display: flex; align-items: center; gap: 18px; margin-bottom: 44px; }
+  #og .brand svg { width: 76px; height: 76px; flex: none; }
+  #og .brand .nm { font-size: 52px; font-weight: 800; letter-spacing: 3px; line-height: 1; }
+  #og .brand .tg { font-size: 21px; color: rgba(255,255,255,.72); margin-top: 10px; letter-spacing: 1px; }
+  #og h1 { font-size: 58px; line-height: 1.26; font-weight: 800; letter-spacing: 1px; }
+  #og p { margin-top: 26px; font-size: 26px; color: rgba(255,255,255,.8); letter-spacing: .5px; }
+  #og .domain {
+    position: absolute; left: 88px; bottom: 48px;
+    font-size: 21px; color: rgba(255,255,255,.55); letter-spacing: 1px;
+  }
+  #og .rule {
+    position: absolute; right: -140px; top: -140px; width: 520px; height: 520px;
+    border: 2px solid rgba(255,255,255,.13); border-radius: 50%;
+  }
+  #og .rule2 {
+    position: absolute; right: 30px; bottom: -200px; width: 380px; height: 380px;
+    border: 2px solid rgba(255,255,255,.1); border-radius: 50%;
+  }
+</style>
+</head>
+<body>
+  <div id="apple">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+      <path fill="#ffffff" d="M64 14 c-19 0 -34 15 -34 33 c0 24 34 61 34 61 s34 -37 34 -61 c0 -18 -15 -33 -34 -33 Z"/>
+      <path d="M54 82 V42 H66 a13 13 0 0 1 0 26 H54" fill="none" stroke="#0d3fb0"
+        stroke-width="12" stroke-linecap="round" stroke-linejoin="round"/>
+    </svg>
+  </div>
+
+  <div id="og">
+    <div class="rule"></div>
+    <div class="rule2"></div>
+    <div class="brand">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+        <path fill="#ffffff" d="M64 14 c-19 0 -34 15 -34 33 c0 24 34 61 34 61 s34 -37 34 -61 c0 -18 -15 -33 -34 -33 Z"/>
+        <path d="M54 82 V42 H66 a13 13 0 0 1 0 26 H54" fill="none" stroke="#0d3fb0"
+          stroke-width="12" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+      <div>
+        <div class="nm">泊月</div>
+        <div class="tg">停车月卡比价</div>
+      </div>
+    </div>
+    <h1>按位置和价格，<br/>挑一张能办的停车月卡</h1>
+    <p>7816 个车场 · 月卡 / 季卡 / 夜间套餐 · 折合月价比价</p>
+    <div class="domain">jietingche.shenzjd.com</div>
+  </div>
+</body>
+</html>
