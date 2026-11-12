@@ -51,7 +51,13 @@ export async function GET(req: Request) {
   });
   return apiJson("search", req, result.parks, {
     limit: 240,
-    meta: { total: result.total, page: result.page, pageSize: result.pageSize },
+    meta: {
+      total: result.total,
+      page: result.page,
+      pageSize: result.pageSize,
+      // 原词 0 命中、改用降级词时回传实际词，前端据此提示「没找到 X，下面是 Y 的结果」
+      fallbackQuery: result.fallbackQuery ?? "",
+    },
     headers: {
       "Cache-Control": "public, max-age=30, s-maxage=60, stale-while-revalidate=300",
     },

@@ -3,6 +3,7 @@ import type { OutreachLogRow, StatSnapshot } from "./adminTypes";
 import { db, ensureSchema, newId, now, num, str } from "./db";
 import { toCarPark, toLog, toPackage, toSnapshot } from "./rows";
 import { CONFIG_KEYS } from "./schema";
+import { buildQueryPlan, type PlaceDict, type QueryVariant } from "./searchQuery";
 import {
   DEFAULT_SHARE_CODE,
   FOCUS_CITIES,
@@ -369,6 +370,32 @@ export interface SearchResult {
   total: number;
   page: number;
   pageSize: number;
+  /** 原词 0 命中、改用降级词时的实际词（前端据此提示「没找到 X，下面是 Y 的结果」） */
+  fallbackQuery?: string;
+}
+
+/**
+ * 位置词典：城市/区县全名，给「深圳合一社区 → 合一社区」这类剥词用。
+ * 只有 130 个城市 + 550 个区，进程内缓存 10 分钟，比每次扫表便宜得多。
+ */
+let placeDictCache: { at: number; value: PlaceDict } | null = null;
+const PLACE_DICT_TTL = 10 * 60 * 1000;
+
+export async function getPlaceDict(): Promise<PlaceDict> {
+  if (placeDictCache && Date.now() - placeDictCache.at < PLACE_DICT_TTL) {
+    return placeDictCache.value;
+  }
+  await ensureSchema();
+  const [cities, districts] = await Promise.all([
+    db.execute("SELECT DISTINCT city FROM car_parks WHERE city <> ''"),
+    db.execute("SELECT DISTINCT district FROM car_parks WHERE district <> ''"),
+  ]);
+  const value: PlaceDict = {
+    cities: cities.rows.map((row) => str(row.city)),
+    districts: districts.rows.map((row) => str(row.district)),
+  };
+  placeDictCache = { at: Date.now(), value };
+  return value;
 }
 
 /**
@@ -398,21 +425,46 @@ export async function nearestCity(lat: number, lng: number): Promise<string> {
 /**
  * 面向访客的搜索：按官方那套筛（城市/区/业态/套餐类型/时段/价格）+ 定位距离排序。
  * 先按条件筛出车场 id 分页，再补车场和套餐，避免把几万行拉进内存。
+ *
+ * 关键词先走预处理（见 searchQuery.ts）：原词命中就到此为止，
+ * 一条都没命中才依次试「剥掉城市/区/意图词」的降级写法，并在结果里回传实际用的词。
  */
 export async function searchPublic(input: SearchInput): Promise<SearchResult> {
   await ensureSchema();
+  const raw = (input.q ?? "").trim();
+  if (!raw) return runSearch(input, null);
+
+  const plan = buildQueryPlan(raw, await getPlaceDict());
+  if (!plan.primary) return runSearch(input, null);
+
+  const first = await runSearch(input, plan.primary);
+  if (first.total > 0) return first;
+
+  // 原词 0 命中才走降级：这正是「深圳合一社区」这类输入能出结果的原因
+  for (const variant of plan.fallbacks) {
+    const retry = await runSearch(input, variant);
+    if (retry.total > 0) return { ...retry, fallbackQuery: variant.keyword };
+  }
+  return first;
+}
+
+async function runSearch(input: SearchInput, variant: QueryVariant | null): Promise<SearchResult> {
   const page = Math.max(1, Math.floor(input.page ?? 1));
   const pageSize = Math.min(50, Math.max(1, Math.floor(input.pageSize ?? 20)));
 
   const parkConds: string[] = [];
   const parkArgs: (string | number)[] = [];
 
-  const kw = (input.q ?? "").trim();
-  if (kw) {
+  /**
+   * 关键词条件：每个词都要命中（AND），单独一个词命中任意一列即可（OR）。
+   * 城市也进 OR 列表——搜「深圳」「南山」这种纯地名时，现在的实现会返回 0 条。
+   */
+  const terms = variant?.terms ?? [];
+  for (const term of terms) {
     parkConds.push(
-      "(c.name LIKE ? OR c.address LIKE ? OR c.keywords LIKE ? OR c.district LIKE ? OR c.area LIKE ? OR c.industry LIKE ?)",
+      "(c.name LIKE ? OR c.address LIKE ? OR c.keywords LIKE ? OR c.district LIKE ? OR c.area LIKE ? OR c.industry LIKE ? OR c.city LIKE ?)",
     );
-    for (let i = 0; i < 6; i += 1) parkArgs.push(like(kw));
+    for (let i = 0; i < 7; i += 1) parkArgs.push(like(term));
   }
   if (input.city) {
     parkConds.push("c.city = ?");
@@ -488,8 +540,26 @@ export async function searchPublic(input: SearchInput): Promise<SearchResult> {
     for (let i = 0; i < 3; i += 1) orderArgs.push(lat, lat, lng, lng, cosLat);
   }
 
-  const finalOrder = [focusOrder, orderSql].filter(Boolean).join(", ");
-  const finalOrderArgs = focusOrder ? [...FOCUS_CITIES, ...orderArgs] : orderArgs;
+  /**
+   * 相关性：用户打了字，命中的是「车场名」还是「地址/关键词的零碎片段」必须拉开。
+   * 没有这一层时，搜「合一」会把一条 60 元/月的日卡顶到首屏，而用户找的
+   * 「合一停车场」可能在第 20 位——看起来就像搜不到。
+   *
+   * 只在单词搜索时启用：多词时没有「哪个词更重要」的客观依据，硬排会偏。
+   */
+  const relWord = terms.length === 1 ? terms[0] : "";
+  const relevanceSql = relWord
+    ? `MIN(CASE WHEN c.name = ? THEN 0 WHEN c.name LIKE ? THEN 1 ` +
+      `WHEN c.keywords LIKE ? OR c.address LIKE ? THEN 2 ELSE 3 END)`
+    : "";
+  const relevanceArgs = relWord ? [relWord, like(relWord), like(relWord), like(relWord)] : [];
+
+  const finalOrder = [relevanceSql, focusOrder, orderSql].filter(Boolean).join(", ");
+  const finalOrderArgs = [
+    ...relevanceArgs,
+    ...(focusOrder ? FOCUS_CITIES : []),
+    ...orderArgs,
+  ];
   const whereSql = [...parkConds, ...pkgConds].join(" AND ");
   const [idRes, totalRes] = await Promise.all([
     db.execute({
@@ -536,6 +606,93 @@ export async function searchPublic(input: SearchInput): Promise<SearchResult> {
   }
 
   return { parks, total, page, pageSize };
+}
+
+/* ---------------------------- 以点找附近车场 ---------------------------- */
+
+export interface NearbyInput {
+  lat: number;
+  lng: number;
+  /** 当前列表里已经出现的车场，附近里不要再出现一遍 */
+  excludeIds?: string[];
+  limit?: number;
+  /**
+   * 半径档位（km），从近到远依次试，第一档有货就停。
+   * 为什么要分档：珠三角一个点 1km 内就有 6 个，而北京整城才 167 个，
+   * 固定半径要么在下沉城市永远是空，要么在深圳把 3km 外的塞进「附近」。
+   */
+  radii?: number[];
+}
+
+export interface NearbyResult {
+  parks: ParkWithPackages[];
+  /** 实际生效的半径（km）；一条都没找到时是最后一档 */
+  radiusKm: number;
+}
+
+/**
+ * 以任意坐标为中心找「能办月卡」的车场，按直线距离升序。
+ *
+ * 用途：用户搜到的结果很少时（比如只有一个「合一停车场」），拿它的坐标当锚点
+ * 补一段真正走得到的选择，而不是让用户自己再去改城市/地区碰运气。
+ */
+export async function listNearbyByPoint(input: NearbyInput): Promise<NearbyResult> {
+  await ensureSchema();
+  const limit = Math.min(20, Math.max(1, Math.floor(input.limit ?? 8)));
+  const radii = (input.radii ?? [3, 10]).filter((km) => Number.isFinite(km) && km > 0).slice(0, 3);
+  if (!radii.length) radii.push(3);
+  if (!Number.isFinite(input.lat) || !Number.isFinite(input.lng)) {
+    return { parks: [], radiusKm: radii[0] };
+  }
+
+  const exclude = (input.excludeIds ?? []).filter(Boolean).slice(0, 40);
+  // 必须带 alias：car_parks 和 packages 都有 name 列，不加前缀 SQLite 会报 ambiguous
+  const pkgFilter = packageConds({ activeOnly: true }, "k");
+  /** 距离平方（度²）：同一段落里只比大小，不用开方 */
+  const dist2 = "(((c.lat - ?) * (c.lat - ?)) + ((c.lng - ?) * (c.lng - ?)) * ?)";
+  const cosLat = Math.cos((input.lat * Math.PI) / 180) ** 2 || 1;
+  const geoArgs = [input.lat, input.lat, input.lng, input.lng, cosLat];
+
+  let ids: string[] = [];
+  let radiusKm = radii[radii.length - 1];
+  for (const km of radii) {
+    radiusKm = km;
+    const deg2 = (km / 111.32) ** 2;
+    const conds = [
+      "c.lat IS NOT NULL AND c.lng IS NOT NULL",
+      `${dist2} <= ?`,
+      ...(exclude.length ? [`c.id NOT IN (${placeholders(exclude.length)})`] : []),
+      ...pkgFilter.sql,
+    ];
+    const res = await db.execute({
+      sql: `SELECT c.id AS id FROM car_parks c JOIN packages k ON k.park_id = c.id
+            WHERE ${conds.join(" AND ")}
+            GROUP BY c.id
+            ORDER BY ${dist2} ASC
+            LIMIT ?`,
+      args: [...geoArgs, deg2, ...exclude, ...pkgFilter.args, ...geoArgs, limit],
+    });
+    ids = res.rows.map((row) => str(row.id));
+    if (ids.length) break;
+  }
+  if (!ids.length) return { parks: [], radiusKm };
+
+  const parkRes = await db.execute({
+    sql: `SELECT * FROM car_parks WHERE id IN (${placeholders(ids.length)})`,
+    args: ids,
+  });
+  const byId = new Map(parkRes.rows.map((row) => [str(row.id), toCarPark(row)]));
+  const grouped = await packagesByPark(ids, { activeOnly: true });
+  const parks = ids
+    .map((id) => byId.get(id))
+    .filter((park): park is CarPark => Boolean(park))
+    .map<ParkWithPackages>((park) => ({
+      ...park,
+      packages: grouped.get(park.id) ?? [],
+      distance:
+        park.lat && park.lng ? distanceMeters(input.lat, input.lng, park.lat, park.lng) : null,
+    }));
+  return { parks, radiusKm };
 }
 
 export interface FacetItem {

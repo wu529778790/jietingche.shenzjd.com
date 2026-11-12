@@ -3,17 +3,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { BrandPin } from "@/components/BrandMark";
+import ParkCard from "@/components/ParkCard";
 import type { FilterValues } from "@/components/FilterSheet";
 import { beacon } from "@/lib/beacon";
-import {
-  SORT_OPTIONS,
-  formatDistance,
-  monthlyPrice,
-  shortPackageName,
-  yuan,
-  type Package,
-  type ParkWithPackages,
-} from "@/lib/types";
+import { SORT_OPTIONS, type Package, type ParkWithPackages } from "@/lib/types";
 
 interface FacetItem {
   name: string;
@@ -29,7 +22,22 @@ interface Facets {
 }
 
 const PAGE_SIZE = 20;
+/**
+ * 命中少于这个数就认为「这片区域没覆盖到」，补一段周边。
+ *
+ * 阈值取 5：一个商圈/小区名正常应该能带出三五个可选车场，
+ * 只有一两个说明用户找的具体位置附近我们没收录，列表本身给不出选择。
+ */
+const NEARBY_TRIGGER_TOTAL = 5;
 const EMPTY_FACETS: Facets = { cities: [], districts: [], industries: [], types: [], slots: [] };
+
+/** 「附近还有」这一段的数据：锚点是用户搜到的第一个车场 */
+interface NearbyBlock {
+  parks: ParkWithPackages[];
+  /** 锚点车场名，标题里要写清「以谁为中心」，否则用户不知道这些距离是从哪儿算的 */
+  anchor: string;
+  radiusKm: number;
+}
 
 /**
  * 三个弹层按需加载。
@@ -134,6 +142,10 @@ export default function HomeSearch() {
   const [active, setActive] = useState<{ park: ParkWithPackages; pkg: Package } | null>(null);
   const [filterOpen, setFilterOpen] = useState(false);
   const [locationOpen, setLocationOpen] = useState(false);
+  /** 命中太少时补的一段「附近还有这些车场」，跟着每次新搜索一起清掉 */
+  const [nearby, setNearby] = useState<NearbyBlock | null>(null);
+  /** 原词一条都没命中、后端换了个写法时才有的值（如「深圳合一社区」→「合一社区」） */
+  const [fallbackQuery, setFallbackQuery] = useState("");
 
   const reqId = useRef(0);
   /** 用户手动选过城市后，定位反查到的城市不要覆盖他的选择 */
@@ -176,6 +188,44 @@ export default function HomeSearch() {
       .catch(() => undefined)
       .finally(() => setDistrictsLoading(false));
   }, [city]);
+
+  /**
+   * 以「命中的第一个车场」为中心找附近车场。
+   *
+   * 只用来补结果很少的情况：结果多的时候列表本身已经覆盖这片区域，
+   * 再挂一段周边会让人以为下面还有一批更近的。
+   */
+  const loadNearby = useCallback(async (list: ParkWithPackages[], id: number) => {
+    const anchor = list.find((park) => park.lat && park.lng);
+    if (!anchor) {
+      setNearby(null);
+      return;
+    }
+    const params = new URLSearchParams({
+      lat: String(roundCoord(anchor.lat)),
+      lng: String(roundCoord(anchor.lng)),
+      limit: "8",
+      // 已经出现在列表里的别再重复一遍；只带前 10 个，URL 太长会让 CDN 无法复用
+      exclude: list
+        .slice(0, 10)
+        .map((park) => park.id)
+        .join(","),
+    });
+    try {
+      const res = await fetch(`/api/nearby?${params.toString()}`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const json = await res.json();
+      if (reqId.current !== id) return;
+      const nearbyParks: ParkWithPackages[] = json?.data ?? [];
+      setNearby(
+        nearbyParks.length
+          ? { parks: nearbyParks, anchor: anchor.name, radiusKm: Number(json?.radiusKm) || 3 }
+          : null,
+      );
+    } catch {
+      if (reqId.current === id) setNearby(null);
+    }
+  }, []);
 
   const fetchList = useCallback(
     async (targetPage: number, append: boolean) => {
@@ -221,6 +271,16 @@ export default function HomeSearch() {
         setParks((prev) => (append ? [...prev, ...list] : list));
         setTotal(json?.total ?? list.length);
         setPage(targetPage);
+        if (!append) {
+          const hits = json?.total ?? list.length;
+          setFallbackQuery(typeof json?.fallbackQuery === "string" ? json.fallbackQuery : "");
+          // 命中太少说明用户找的那个地方附近我们没收录，拿第一个车场当锚点补一段周边
+          if (list.length && hits > 0 && hits <= NEARBY_TRIGGER_TOTAL) {
+            void loadNearby(list, id);
+          } else {
+            setNearby(null);
+          }
+        }
         return true;
       } catch {
         return false;
@@ -232,7 +292,7 @@ export default function HomeSearch() {
         }
       }
     },
-    [keyword, city, district, industry, type, slot, maxPrice, sort, coords],
+    [keyword, city, district, industry, type, slot, maxPrice, sort, coords, loadNearby],
   );
 
   /**
@@ -552,74 +612,42 @@ export default function HomeSearch() {
         </div>
       ) : null}
 
+      {/* 原词没命中、后端换了写法时要说清，否则用户会以为自己搜错了 */}
+      {!loading && fallbackQuery ? (
+        <div className="card px-3 py-2 text-[11px] leading-relaxed text-muted">
+          「{keyword.trim()}」没有直接匹配的车场，下面是「{fallbackQuery}」的结果
+        </div>
+      ) : null}
+
       {/* 筛选/翻页时列表整体淡一点，明确「正在换结果」，但不打断浏览 */}
       <div className={loading && parks.length > 0 ? "space-y-3 opacity-60" : "space-y-3"}>
         {parks.map((park) => (
-          <article key={park.id} className="card p-3">
-          <div className="flex items-start justify-between gap-2">
-            <div className="min-w-0">
-              <h2 className="truncate text-sm font-semibold">{park.name}</h2>
-              <div className="mt-0.5 truncate text-xs text-muted">
-                {[park.district, park.area].filter(Boolean).join(" · ")}
-                {park.address ? ` · ${park.address}` : ""}
-              </div>
-              {park.audience ? (
-                <div className="mt-0.5 text-[11px] text-muted">适合：{park.audience}</div>
-              ) : null}
-            </div>
-            <div className="flex shrink-0 flex-col items-end gap-1">
-              {park.industry ? (
-                <span className="rounded-md bg-black/[0.04] px-1.5 py-0.5 text-[11px] text-muted">
-                  {park.industry}
-                </span>
-              ) : null}
-              {typeof park.distance === "number" && park.distance > 0 ? (
-                <span className="rounded-md bg-brand/10 px-1.5 py-0.5 text-[11px] text-brand">
-                  {formatDistance(park.distance)}
-                </span>
-              ) : null}
-            </div>
-          </div>
-
-          <div className="mt-2 flex flex-wrap gap-1.5">
-            {park.packages.length === 0 ? (
-              <span className="text-xs text-muted">暂无在售套餐</span>
-            ) : null}
-            {park.packages.slice(0, 6).map((pkg) => (
-              <button
-                key={pkg.id}
-                onClick={() => setActive({ park, pkg })}
-                className="rounded-lg border border-border px-2.5 py-1.5 text-left transition-colors hover:border-brand/50 hover:bg-brand/[0.03]"
-              >
-                <div className="text-[11px] text-muted">
-                  {pkg.typeLabel || shortPackageName(park.name, pkg.name)}
-                  {pkg.period ? <span className="ml-1">{pkg.period}</span> : null}
-                </div>
-                <div className="mt-0.5 flex items-baseline gap-1">
-                  <span className="text-[13px] font-semibold text-price">
-                    {pkg.price > 0 ? `¥${yuan(pkg.price)}` : "见码"}
-                  </span>
-                  {pkg.originPrice > pkg.price ? (
-                    <span className="text-[10px] text-muted line-through">¥{yuan(pkg.originPrice)}</span>
-                  ) : null}
-                </div>
-                {/* 季卡/年卡总价高，露出折合月价才比得动月卡 */}
-                {pkg.price > 0 && pkg.durationDays >= 60 ? (
-                  <div className="text-[10px] text-muted">
-                    折合 ¥{yuan(monthlyPrice(pkg.price, pkg.durationDays))}/月
-                  </div>
-                ) : null}
-              </button>
-            ))}
-            {park.packages.length > 6 ? (
-              <span className="self-center text-[11px] text-muted">
-                还有 {park.packages.length - 6} 个套餐
-              </span>
-            ) : null}
-          </div>
-          </article>
+          <ParkCard key={park.id} park={park} onPick={(picked, pkg) => setActive({ park: picked, pkg })} />
         ))}
       </div>
+
+      {/* 命中太少时补一段周边：用户搜的是一个具体地点，选择不该只有一条 */}
+      {nearby ? (
+        <section className="space-y-2 pt-1" aria-labelledby="nearby-title">
+          <div className="flex items-baseline justify-between gap-2 px-1">
+            <h2 id="nearby-title" className="text-sm font-semibold">
+              附近还有 {nearby.parks.length} 个能办月卡的
+            </h2>
+            <span className="shrink-0 text-[11px] text-muted">
+              以「{nearby.anchor}」为中心 · {nearby.radiusKm}km 内
+            </span>
+          </div>
+          <div className="space-y-3">
+            {nearby.parks.map((park) => (
+              <ParkCard
+                key={park.id}
+                park={park}
+                onPick={(picked, pkg) => setActive({ park: picked, pkg })}
+              />
+            ))}
+          </div>
+        </section>
+      ) : null}
 
       {hasMore ? (
         <div ref={loadMoreRef} className="py-3 text-center text-xs text-muted">

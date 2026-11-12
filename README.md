@@ -353,6 +353,13 @@ ssh <user>@<host> 'sudo chown 1001:1001 <SITE_DIR>/data/app.db && sudo docker st
     同圈层内价格升序；**没有定位**时按 `FOCUS_CITIES` 城市热度 + 价格升序
   - `sort=distance` 严格按距离、`sort=price` 按最低价、`sort=commission` 按最高佣金
   - 佣金不参与默认排序：它是商家侧指标，按它排会把远且贵的顶到首屏
+  - `q` 先过 `src/lib/searchQuery.ts`：剥掉城市/「附近」「停车场」这类意图词，按空格拆成多词（AND）。
+    **原词一条都没命中**才依次试「剥掉城市/区」的降级写法，命中后回传 `fallbackQuery`
+    （如「深圳合一社区」→「合一社区」）——降级只在 0 结果时发生，不会破坏本来能命中的查询
+  - 命中相关性优先于价格：车场名精确匹配 > 车场名包含 > 地址/关键词命中（单词搜索时才启用）
+- `GET /api/nearby?lat=&lng=&exclude=&radius=&limit=` 以任意坐标找**能办月卡**的车场，按直线距离升序；
+  半径默认 3km，这一档没货自动放到 10km，实际档位在 `meta.radiusKm` 回传。
+  首页命中 ≤5 个时拿第一个车场当锚点补一段「附近还有这些车场」，车场页内链也走距离排序
 - `GET /api/facets?city=` 筛选栏分面
 - `GET /api/locate?lat=&lng=` 定位反查城市（前端定位后自动选中）
 - `GET /api/config` 读前端出码用的 `shareCode`

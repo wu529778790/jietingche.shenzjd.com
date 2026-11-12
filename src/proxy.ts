@@ -8,6 +8,7 @@ import { recordVisit } from "@/lib/visitLog";
 /** 访客只需要这几个：搜索、筛选分面、定位反查城市、读兜底推广码、埋点 */
 const PUBLIC_API = new Set([
   "/api/search",
+  "/api/nearby",
   "/api/facets",
   "/api/locate",
   "/api/log",
