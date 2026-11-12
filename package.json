@@ -9,6 +9,7 @@
     "lint": "eslint",
     "db:push": "node scripts/push-to-turso.mjs",
     "db:pull": "node --no-warnings scripts/pull-from-turso.mjs",
+    "db:sync": "node --no-warnings scripts/sync-db-to-server.mjs",
     "db:clean": "node --no-warnings scripts/clean-data.mjs",
     "snapshot": "node --no-warnings scripts/export-snapshot.mjs",
     "snapshot:publish": "node --no-warnings scripts/publish-snapshot.mjs",

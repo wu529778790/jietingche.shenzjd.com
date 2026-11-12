@@ -307,13 +307,27 @@ ADMIN_PASSWORD='换成一个强口令'
 **业务库怎么更新到服务器**（改了数据/后台改过库之后）：
 
 ```bash
-npm run db:pull                                                        # 1. 以线上为准拉一份
-scp data/app.db <user>@<host>:<SITE_DIR>/data/app.db                   # 2. 传上去
-ssh <user>@<host> 'sudo chown 1001:1001 <SITE_DIR>/data/app.db'        # 3. 容器以 1001 运行
+npm run db:sync            # 打包 → 校验 → 备份线上库 → 停容器 → 上传 → 换文件 → 起容器 → 回查
+npm run db:sync -- --dry   # 只打印将要做什么
 ```
 
-传之前**先停容器**（`docker stop jietingche`）再传，避免运行中的进程还握着旧文件句柄；
-传完 `docker start jietingche`。直接 `scp` 覆盖正在使用的 SQLite 有触发 `database disk image is malformed` 的风险。
+脚本读根目录 `.env.deploy`（已 gitignore）里的 `DEPLOY_HOST` / `DEPLOY_USER` / `DEPLOY_SITE_DIR` / `DEPLOY_CONTAINER`
+等，走 `~/.ssh` 免密；任一步失败都会从 `app.db.bak-<时间戳>` 回滚并把容器拉起来。
+本地库**比线上车场少**时脚本会警告——那种情况应该先 `npm run db:pull` 以线上为准。
+
+手工等价流程（脚本不可用时）：
+
+```bash
+npm run db:pull                                                        # 1. 以线上为准拉一份
+ssh <user>@<host> 'sudo docker stop jietingche'                        # 2. 先停容器
+scp data/app.db <user>@<host>:<SITE_DIR>/data/app.db                   # 3. 传上去
+ssh <user>@<host> 'sudo chown 1001:1001 <SITE_DIR>/data/app.db && sudo docker start jietingche'
+```
+
+直接 `scp` 覆盖正在使用的 SQLite 有触发 `database disk image is malformed` 的风险，所以必须停容器再传。
+
+本机没配免密时，用 `.github/workflows/ssh-bootstrap.yml`（`workflow_dispatch`，填公钥整行）
+把 `~/.ssh/id_ed25519.pub` 追加到服务器 `authorized_keys`，跑完就能 `ssh jietingche`（`~/.ssh/config` 里的别名）。
 
 ## 接口
 
