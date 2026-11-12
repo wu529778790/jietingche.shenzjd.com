@@ -18,6 +18,8 @@ interface SessionData {
 
 function targetPath(): string {
   const next = new URLSearchParams(window.location.search).get("next") ?? "";
+  // /admin 本身会再转一次，这里直接落到默认页，少一跳
+  if (next === "/admin" || next === "/admin/") return "/admin/parks";
   return next.startsWith("/admin") ? next : "/admin/parks";
 }
 
