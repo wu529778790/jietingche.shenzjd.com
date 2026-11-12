@@ -12,6 +12,24 @@
 import { db, ensureSchema, num, str } from "./db";
 import { dayKey } from "./visitLog";
 
+/**
+ * 搜索词噪声：输入法中间态与过短的串。
+ *
+ * 历史上「科技园」被打成 ke → ke'ji → ke'ji'y → 科 → 科技园 五条，报表里全是碎片。
+ * 前端现在会等输入停顿再埋点，但历史数据和个别浏览器不触发 composition 的情况
+ * 仍会有碎片进来，所以在读端再滤一层：
+ *   - 单字（「科」）
+ *   - 拼音候选串（含 ' 或 ’）
+ *   - 纯 ASCII 且长度 < 4（ke / ab / 123）
+ */
+function isNoiseQuery(raw: string): boolean {
+  const q = raw.trim();
+  if (q.length < 2) return true;
+  if (/['’]/.test(q)) return true;
+  if (/^[\x20-\x7e]+$/.test(q) && q.length < 4) return true;
+  return false;
+}
+
 export interface DailyTraffic {
   day: string;
   pv: number;
@@ -107,9 +125,13 @@ export async function trafficReport(days = 7): Promise<TrafficReport> {
             GROUP BY ip_hash ORDER BY hits DESC LIMIT 25`,
       args: [since],
     }),
+    // 搜索词榜只数前端埋点（真人主动搜），口径与 daily 里的 search 列一致。
+    // 以前不区分 kind，同一个词会被记两遍（proxy 的 /api/search + 前端 beacon），
+    // 报表里每个词都翻倍。多取一些再在 JS 里滤噪声，过滤后仍能凑够 25 条。
     db.execute({
       sql: `SELECT q, COUNT(*) AS n FROM visit_logs
-            WHERE ts >= ? AND q <> '' GROUP BY q ORDER BY n DESC LIMIT 25`,
+            WHERE ts >= ? AND kind = 'event' AND name = 'search' AND trim(q) <> ''
+            GROUP BY q ORDER BY n DESC LIMIT 100`,
       args: [since],
     }),
     db.execute({
@@ -157,7 +179,10 @@ export async function trafficReport(days = 7): Promise<TrafficReport> {
       direct: num(row.direct),
       sample: str(row.sample).slice(0, 60),
     })),
-    queries: queryRes.rows.map((row) => ({ q: str(row.q), n: num(row.n) })),
+    queries: queryRes.rows
+      .map((row) => ({ q: str(row.q), n: num(row.n) }))
+      .filter((row) => !isNoiseQuery(row.q))
+      .slice(0, 25),
     directHits: num(directRes.rows[0]?.direct),
     totalHits: num(directRes.rows[0]?.total),
   };

@@ -87,6 +87,14 @@ function writeGeoCache(coords: GeoCache): void {
 
 export default function HomeSearch() {
   const [keyword, setKeyword] = useState("");
+  /**
+   * 输入法正在组合（拼音还没上屏）。
+   *
+   * 中文输入时每敲一个字母都会触发 onChange，值还是半成品（ke / ke'ji / 科…）。
+   * 以前这些中间态会各自发一趟搜索、各记一条埋点，报表里全是半成品词。
+   * 现在组合期间不请求也不埋点，等候选词上屏（compositionend）再算一次。
+   */
+  const [imeOpen, setImeOpen] = useState(false);
   const [city, setCity] = useState("");
   const [district, setDistrict] = useState("");
   const [industry, setIndustry] = useState("");
@@ -213,10 +221,6 @@ export default function HomeSearch() {
         setParks((prev) => (append ? [...prev, ...list] : list));
         setTotal(json?.total ?? list.length);
         setPage(targetPage);
-        // 只记「有条件的搜索」（翻页和默认列表不算），否则搜索量会被默认列表灌水
-        if (!append && (keyword.trim() || city || district || industry || type || slot || maxPrice > 0)) {
-          beacon("search", { q: keyword.trim(), n: json?.total ?? list.length });
-        }
         return true;
       } catch {
         return false;
@@ -238,12 +242,35 @@ export default function HomeSearch() {
   const geoWaiting = geoState === "boot" || geoState === "locating";
 
   useEffect(() => {
-    if (geoWaiting) return;
+    // 拼音还在组合：等上屏再发，否则一趟输入会打出五六个半成品请求
+    if (geoWaiting || imeOpen) return;
     const timer = setTimeout(() => {
       fetchList(1, false);
-    }, 250);
+    }, 300);
     return () => clearTimeout(timer);
-  }, [fetchList, geoWaiting]);
+  }, [fetchList, geoWaiting, imeOpen]);
+
+  /** 当前结果数（给埋点用；直接挂进依赖会让每次结果变化都重发一次上报） */
+  const totalRef = useRef(0);
+  useEffect(() => {
+    totalRef.current = total;
+  }, [total]);
+
+  /**
+   * 搜索埋点只认「用户真正想搜的词」：输入停下来 1.2 秒、结果也回来了才记一条，
+   * 同一次访问里同一个词只记一次。以前挂在 fetchList 里，等于每个中间态各记一笔。
+   */
+  const lastBeaconQ = useRef("");
+  useEffect(() => {
+    const q = keyword.trim();
+    if (!q || imeOpen || geoWaiting || loading) return;
+    if (lastBeaconQ.current === q) return;
+    const timer = setTimeout(() => {
+      lastBeaconQ.current = q;
+      beacon("search", { q, n: totalRef.current });
+    }, 1200);
+    return () => clearTimeout(timer);
+  }, [keyword, imeOpen, geoWaiting, loading]);
 
   const hasMore = !exhausted && parks.length > 0 && parks.length < total;
 
@@ -430,6 +457,13 @@ export default function HomeSearch() {
             onChange={(e) => {
               skipGeo();
               setKeyword(e.target.value);
+            }}
+            // 拼音组合期间只更新输入框，不发请求也不埋点（见 imeOpen 注释）
+            onCompositionStart={() => setImeOpen(true)}
+            onCompositionEnd={(e) => {
+              skipGeo();
+              setKeyword(e.currentTarget.value);
+              setImeOpen(false);
             }}
             placeholder="搜车场名、商圈、地铁站，如：科技园 / 万象城"
             autoComplete="off"
