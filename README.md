@@ -250,13 +250,24 @@ npm run toy -- --snapshot data/jtc-snapshot.json        # B站 Toy → platforms
 - 后台看板：`/admin/traffic`（今日 PV/UV、来源构成、请求最多来源、热门页面、搜索词、每日趋势）。
 - 保留 90 天，`LOG_KEEP_DAYS` 可调；`LOG_OFF=1` 一键停采集；`LOG_SALT` 换盐会让历史 UV 断代。
 
+后台登录接的是 **wx-auth 统一账号**，没有口令：
+
+- 浏览器：后台登录页加载 wx-auth SDK 出小程序码，扫码后 SDK 把签名 token 写进**根域 Cookie**
+  `wxauth-token`（`domain=.shenzjd.com`）。本站与 `wx-auth.shenzjd.com` 同根域，Cookie 自动带过来。
+- 服务端：`proxy.ts` 拿这个 token 问 `GET {WX_AUTH_API_BASE}/api/auth/userinfo`，
+  只有 `user.isAdmin === true` 放行（fail-closed）。管理员身份在 wx-auth 后台给账号打 `is_admin`，
+  本站不维护名单，加人减人都在 wx-auth 里做。
+- 缓存：同一 token 10 分钟内不重复问远程；wx-auth 超时/5xx/限流算「瞬时故障」，回 503 让稍后重试，
+  **不会**把登录态判成失效。
+- 本地开发默认免登录（`next dev` 下直接进后台），想跟线上一致跑
+  `ADMIN_DEV_REQUIRE_WX_AUTH=1 npm run dev`。
+
 ```bash
-# 生产必须配置，容器启动时注入即可（proxy 固定跑 Node 运行时，不需要构建期写死）
-ADMIN_PASSWORD='换成一个强口令'
+# 可选：默认已经是线上地址，一般不用配
+WX_AUTH_API_BASE='https://wx-auth.shenzjd.com'
 ```
 
-登录后下发 7 天 HMAC 签名的 httpOnly cookie；生产环境没配 `ADMIN_PASSWORD` 时后台直接 503，
-不存在默认口令。本地开发不配就是免密，方便调试。
+> `ADMIN_PASSWORD` 已废弃：部署脚本仍会把它写进 `data/.env`，但代码不再读取，留着无害。
 
 模块也按前台/后台拆开了：`src/lib/types.ts` 只放公开领域模型与展示常量（客户端组件会 import），
 `src/lib/adminTypes.ts` 放台账/对账类型，`src/lib/rows.ts` 放 libsql `Row` → 业务对象的映射（仅服务端）。
@@ -282,12 +293,13 @@ ADMIN_PASSWORD='换成一个强口令'
 已配该加速器，所以 `docker pull` 自动生效。
 
 镜像在 Docker Hub 上是 **public**（加速器只代理公开镜像，私有就只能直连 docker.io）。
-镜像里只有编译产物，`TURSO_*` / `ADMIN_PASSWORD` 等运行时配置通过 `data/.env` 以 `--env-file`
+镜像里只有编译产物，`TURSO_*` / `WX_AUTH_API_BASE` 等运行时配置通过 `data/.env` 以 `--env-file`
 注入，不进镜像，运行时也**不需要登录** Docker Hub。
 
 需要的 GitHub secrets：`DOCKERHUB_USERNAME`（Docker ID，不是邮箱）、`DOCKERHUB_TOKEN`、
 `DEPLOY_HOST`、`DEPLOY_USER`、`DEPLOY_PASSWORD`、`TURSO_DATABASE_URL`、`TURSO_AUTH_TOKEN`，
-可选 `DEPLOY_PORT`、`DEPLOY_SITE_DIR`、`APP_PORT`（线上 6715）、`ADMIN_PASSWORD`、`JTC_SHARE_CODE`。
+可选 `DEPLOY_PORT`、`DEPLOY_SITE_DIR`、`APP_PORT`（线上 6715）、`JTC_SHARE_CODE`。
+（`ADMIN_PASSWORD` 已废弃，后台登录改走 wx-auth，见上文「后台」一节。）
 
 服务器上落在 1Panel 站点目录 `/opt/1panel/www/sites/jietingche.shenzjd.com`（可用 `DEPLOY_SITE_DIR` 改），
 所有运行时文件收在 `data/` 下，1Panel 备份站点时会一起带上：
@@ -295,7 +307,8 @@ ADMIN_PASSWORD='换成一个强口令'
 - `data/app.db`：**业务库（SQLite）**，容器读的就是这份。部署脚本会先校验「存在且 `car_parks` 非空」，
   缺失或空库直接中止部署，避免上线一个空白站。目录和文件 owner 必须是 `1001`（容器以 `nextjs` 运行，
   SQLite 要在同目录写 `-wal`/`-journal`）。
-- `data/.env`：`TURSO_DATABASE_URL` / `TURSO_AUTH_TOKEN` / `ADMIN_PASSWORD` / `ALLOWED_ORIGINS` / `JTC_SHARE_CODE`。
+- `data/.env`：`TURSO_DATABASE_URL` / `TURSO_AUTH_TOKEN` / `ALLOWED_ORIGINS` / `JTC_SHARE_CODE`，
+  可选 `WX_AUTH_API_BASE`（不配就用默认的线上地址）。
   chmod 600，`ALLOWED_ORIGINS` 不配默认 `*`。首次部署若不存在，会用 GitHub secrets 自动生成，
   之后以服务器上这份为准；想把 secret 的改动刷进服务器，手动跑一次 workflow 勾 `refresh_env=true`。
 - `data/uploads/`：挂到容器 `/app/public/uploads`，换容器不丢（码图已改成前端生成，这里是通用上传位）。
@@ -346,4 +359,4 @@ ssh <user>@<host> 'sudo chown 1001:1001 <SITE_DIR>/data/app.db && sudo docker st
 
 - `GET/POST/PATCH/DELETE /api/parks`、`/api/packages`、`/api/logs`、`/api/stats`
 - `POST /api/upload` 通用上传（码图已改成前端生成，这里目前没人调用）
-- `POST /api/admin/login`、`POST /api/admin/logout`
+- `GET /api/admin/session` 当前登录身份（免鉴权，登录页用）、`POST /api/admin/logout` 退出

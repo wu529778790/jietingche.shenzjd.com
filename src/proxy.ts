@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { ADMIN_COOKIE, isValidAdminToken } from "@/lib/adminAuth";
+import { isAdminDevBypass, verifyAdminRequest } from "@/lib/adminAuth";
 import { clientIp } from "@/lib/api";
 import { routeExists } from "@/lib/routeGuard";
 import { isBotBlocked } from "@/lib/ua";
@@ -11,7 +11,9 @@ const PUBLIC_API = new Set([
   "/api/facets",
   "/api/locate",
   "/api/log",
-  "/api/admin/login",
+  // 登录页要靠它判断「没登录 / 已登录但不是管理员 / 可以进」，必须免鉴权；
+  // 它只回身份概要（昵称头像 + 是否管理员），不含任何业务数据
+  "/api/admin/session",
   "/api/admin/logout",
 ]);
 
@@ -142,24 +144,48 @@ export async function proxy(req: NextRequest) {
     return NextResponse.next();
   }
 
-  // 后台接口的未授权访问也要留痕：有人扫后台是明确信号
-  const password = process.env.ADMIN_PASSWORD ?? "";
-
-  if (!password) {
-    if (trackable) logVisit(req, pathname, 503);
-    // 本地开发免密；生产环境强制要求配置，避免默认口令上线
-    if (process.env.NODE_ENV !== "production") return NextResponse.next();
-    return isApi
-      ? NextResponse.json({ ok: false, error: "服务端未配置 ADMIN_PASSWORD" }, { status: 503 })
-      : new NextResponse("服务端未配置 ADMIN_PASSWORD", { status: 503 });
+  // 后台不再有口令：身份来自 wx-auth 扫码登录写下的根域 Cookie（wxauth-token），
+  // 管理员判定看 wx-auth 返回的 user.isAdmin。未授权访问也要留痕——有人扫后台是明确信号。
+  if (isAdminDevBypass()) {
+    if (trackable) logVisit(req, pathname, 0);
+    return NextResponse.next();
   }
 
-  const token = req.cookies.get(ADMIN_COOKIE)?.value;
-  if (await isValidAdminToken(token, password)) return NextResponse.next();
+  const verdict = await verifyAdminRequest(req);
+
+  if (verdict.status === "ok") {
+    if (trackable) logVisit(req, pathname, 0);
+    return NextResponse.next();
+  }
+
+  // wx-auth 自己抖了（超时/5xx/限流）：既不是登录失效也不是越权，
+  // 单独一档，别让管理员以为账号被踢了
+  if (verdict.status === "transient") {
+    if (trackable) logVisit(req, pathname, 503);
+    return isApi
+      ? NextResponse.json({ ok: false, error: "登录服务暂时不可用，请稍后重试" }, { status: 503 })
+      : new NextResponse("登录服务暂时不可用，请稍后重试", {
+          status: 503,
+          headers: { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" },
+        });
+  }
+
+  // 登录了但不是管理员：明确告诉他换账号，别再反复弹扫码
+  if (verdict.status === "denied") {
+    if (trackable) logVisit(req, pathname, 403);
+    if (isApi) {
+      return NextResponse.json({ ok: false, error: "当前微信不是管理员" }, { status: 403 });
+    }
+    const url = req.nextUrl.clone();
+    url.pathname = "/admin/login";
+    url.search = "";
+    url.searchParams.set("denied", "1");
+    return NextResponse.redirect(url);
+  }
 
   if (trackable) logVisit(req, pathname, 401);
   if (isApi) {
-    return NextResponse.json({ ok: false, error: "请先登录管理后台" }, { status: 401 });
+    return NextResponse.json({ ok: false, error: "请先用微信扫码登录管理后台" }, { status: 401 });
   }
   const url = req.nextUrl.clone();
   url.pathname = "/admin/login";
