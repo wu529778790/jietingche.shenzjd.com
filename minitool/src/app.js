@@ -681,6 +681,9 @@
     $("cityTag").textContent = DATA.city ? "·" + DATA.city + "版" : "";
     $("upd").textContent = DATA.updatedAt || "";
 
+    // 试水包只带一个城市（构建时 --max-parks），城市切换没有意义，直接藏掉入口
+    if (INDEX.cities.length <= 1) $("btnCity").hidden = true;
+
     $("btnLoc").addEventListener("click", locate);
     bindListEvents();
 

@@ -110,6 +110,16 @@ npm run toy -- --snapshot data/jtc-snapshot.json        # B站 Toy → platforms
 - xhs：带 `mini_tool.json`，跑 minitool-zip-builder 的审计；
 - toy：不带平台清单、不跑小红书审计，zip 根目录直接是 `index.html`（详见 `platforms/toy/README.md`）。
 
+试水包（首审验红线用，只出少数车场，包约 30KB）：
+
+```bash
+npm run minitool -- --max-parks 3                     # 内联城市里套餐最多的 3 个车场
+npm run minitool -- --only-park p240672210,p251201102 # 按 park_code 精确指定
+```
+
+带这两个参数时城市索引只留内联城市、其余城市分包不出，前端也会自动藏掉城市切换入口。
+首审用最小包过一次，确认「保存二维码 → 微信扫」不触导流红线，再换回全量包。
+
 - 快照只留打包要用的字段（`raw` 压缩成 `packageInterval` 一个数），59MB 原始池 → 10.6MB JSON，
   可以放到任意能直链下载的地方；
 - 不带 `--snapshot` 时仍读本地 `data/jtc.db`，老流程不变；

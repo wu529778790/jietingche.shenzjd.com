@@ -17,6 +17,11 @@
  *   node --no-warnings scripts/build-h5.mjs --target toy            出 B站 Toy 包
  *   node --no-warnings scripts/build-h5.mjs --city 广州市           内联城市改为广州
  *   node --no-warnings scripts/build-h5.mjs --snapshot data/jtc-snapshot.json
+ *
+ * 试水包（首审验红线用，见 reference/xhs-minitool-research.md §五）：
+ *   --max-parks 3            只留内联城市里套餐最多的 3 个车场，并删掉其余城市分包
+ *   --only-park p240672210,p251201102   按 park_code 精确指定车场（与 --max-parks 二选一）
+ * 带这两个参数时索引只保留内联城市，避免出现「能切城市但没数据」。
  */
 
 import { DatabaseSync } from "node:sqlite";
@@ -65,6 +70,13 @@ if (!TARGET) {
 const SRC_DIR = resolve(ROOT, "minitool/src");
 const DIST = resolve(ROOT, TARGET.dist);
 const inlineCity = argValue("--city") ?? "深圳市";
+/** 试水包：只出少数车场，用于首审验证「二维码引导扫码」是否触红线 */
+const maxParks = Number(argValue("--max-parks") ?? 0) || 0;
+const onlyParkCodes = (argValue("--only-park") ?? "")
+  .split(",")
+  .map((s) => s.trim())
+  .filter(Boolean);
+const restrictParks = maxParks > 0 || onlyParkCodes.length > 0;
 /** 用 export-snapshot 产出的 JSON 当数据源（CI / 换机器时用，不必有本地 jtc.db） */
 const snapshotArg = argValue("--snapshot") ?? process.env.JTC_SNAPSHOT;
 // 全局兜底码：2026-11-10 官方首页海报解码（search-stall 会话）
@@ -214,6 +226,37 @@ for (const park of parks.values()) {
   if (!byCity.has(c)) byCity.set(c, []);
   byCity.get(c).push(park);
 }
+
+/* 试水包：砍到只剩内联城市的少数车场。首审只验红线，不给全量数据。 */
+if (restrictParks) {
+  const cityParks = byCity.get(inlineCity) ?? [];
+  if (!cityParks.length) {
+    console.error(`内联城市「${inlineCity}」没有在售套餐，换 --city`
+      + `（可用 TOP5：${[...byCity.entries()].sort((a, b) => b[1].length - a[1].length)
+        .slice(0, 5).map(([c, l]) => `${c}(${l.length})`).join(" ")}）`);
+    process.exit(1);
+  }
+  let kept = cityParks;
+  if (onlyParkCodes.length) {
+    const wanted = new Set(onlyParkCodes);
+    kept = cityParks.filter((x) => wanted.has(x.pc));
+    const missing = onlyParkCodes.filter((code) => !kept.some((x) => x.pc === code));
+    if (missing.length) {
+      console.error(`--only-park 里有「${inlineCity}」不存在的 park_code：${missing.join(", ")}`);
+      process.exit(1);
+    }
+  }
+  if (maxParks > 0 && kept.length > maxParks) {
+    kept = kept.slice()
+      .sort((a, b) => b.p.length - a.p.length || a.pc.localeCompare(b.pc))
+      .slice(0, maxParks);
+  }
+  byCity.clear();
+  byCity.set(inlineCity, kept);
+  console.log(`试水包：只保留 ${inlineCity} 的 ${kept.length} 个车场`
+    + `（${kept.reduce((s, x) => s + x.p.length, 0)} 个套餐），其余城市分包不出`);
+}
+
 const cityList = [...byCity.entries()]
   .map(([c, list]) => ({
     c,
@@ -378,7 +421,8 @@ const zipEntries = [
   "qr-data.js",
   "qr-encoder.js",
   ...(TARGET.platformManifest ? ["mini_tool.json"] : []),
-  "assets",
+  // 试水包没有城市分包，assets/ 是空目录，不塞进 zip（避免打包工具报空目录）
+  ...(cityFiles > 0 ? ["assets"] : []),
 ];
 if (process.platform === "win32") {
   execFileSync("powershell", [
@@ -395,8 +439,10 @@ if (existsSync(audit)) {
   execFileSync("node", [audit, zipPath], { stdio: "inherit" });
 }
 
-console.log(`目标：${TARGET.label}（${TARGET.dist}）`);
-console.log(`城市：${cityList.length} 个｜车场 ${parks.size}｜套餐 ${cityList.reduce((s, x) => s + x.p, 0)}${skippedDeposit ? `｜已过滤付定金 ${skippedDeposit} 条` : ""}`);
+const totalPkg = cityList.reduce((s, x) => s + x.p, 0);
+const totalPark = cityList.reduce((s, x) => s + x.n, 0);
+console.log(`目标：${TARGET.label}（${TARGET.dist}）${restrictParks ? "｜试水包" : ""}`);
+console.log(`城市：${cityList.length} 个｜车场 ${totalPark}｜套餐 ${totalPkg}${skippedDeposit ? `｜已过滤付定金 ${skippedDeposit} 条` : ""}`);
 console.log(`内联城市：${inlineCity}（data.js ${(JSON.stringify(inline.parks).length / 1024).toFixed(0)}KB）｜城市分包 ${cityFiles} 个共 ${(cityBytes / 1024).toFixed(0)}KB`);
 console.log(`兜底码：${globalUrl}`);
 console.log(`上传包：${zipPath}`);
