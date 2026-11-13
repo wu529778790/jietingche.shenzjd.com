@@ -4,22 +4,22 @@
 <meta charset="utf-8" />
 <title>泊月 · 品牌出图（OG / apple-icon）</title>
 <!--
-  出图源文件。改完文案或配色后重新生成两张图：
+  出图源文件 / 预览页。
 
-    #og         → public/og.png           1200×630 分享图（微信/微博/X 卡片）
-    #apple      → src/app/apple-icon.png   180×180 iOS 桌面图标（不切圆角，系统会自己切）
-    #pwa192     → public/icons/icon-192.png
-    #pwa512     → public/icons/icon-512.png
-    #maskable   → public/icons/maskable-512.png（针缩到 52%，留给系统圆角/圆形裁切的安全区）
+    node scripts/brand/render-og.mjs      → public/og.png（1200×630，从本文件的 #og 区块生成）
+    node scripts/brand/render-icons.mjs   → public/icons/icon-192|512|maskable-512.png
+                                            + src/app/apple-icon.png（纯 SVG 渲染，不经过本文件）
 
-  重现方式二选一：
-  1) 浏览器打开本文件，DevTools 里对对应元素右键「Capture node screenshot」；
-  2) Playwright / puppeteer 里对元素截图：
-       await page.locator('#og').screenshot({ path: 'public/og.png' });
-       await page.locator('#apple').screenshot({ path: 'src/app/apple-icon.png' });
+  本文件里的 #apple / #pwa192 / #pwa512 / #maskable 只作视觉预览。
+  换机器上跑不了 render-og.mjs（缺 Chromium）时，浏览器打开本文件，
+  在 DevTools 里对 #og 右键「Capture node screenshot」也能出图。
 
-  图形本身的唯一源是 src/app/icon.svg（favicon / 页面内联都用同一份路径数据），
-  本文件里的 SVG 是它的内联副本——改了图标记得三处（icon.svg / 本文件 / BrandMark.tsx）同步。
+  图形有两套参数，改动要一起同步：
+    · src/app/icon.svg          r=30 / stroke=10，favicon 用（小一号的针 + 细 P）
+    · src/components/BrandMark.tsx  r=34 / stroke=12，页面内联 / 图标 / 分享图用
+    · src/proxy.ts              离线页内联副本（蓝针白 P 反色）
+    · 本文件                    5 处内联副本（第 2 套参数）
+  改完再跑上面两个 render 脚本重出图片。
 -->
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -75,7 +75,7 @@
   <div id="apple">
     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
       <path fill="#ffffff" d="M64 14 c-19 0 -34 15 -34 33 c0 24 34 61 34 61 s34 -37 34 -61 c0 -18 -15 -33 -34 -33 Z"/>
-      <path d="M54 82 V42 H66 a13 13 0 0 1 0 26 H54" fill="none" stroke="#0d3fb0"
+      <path d="M54 75 V35 H66 a13 13 0 0 1 0 26 H54" fill="none" stroke="#0d3fb0"
         stroke-width="12" stroke-linecap="round" stroke-linejoin="round"/>
     </svg>
   </div>
@@ -83,7 +83,7 @@
   <div id="pwa192" class="tile">
     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
       <path fill="#ffffff" d="M64 14 c-19 0 -34 15 -34 33 c0 24 34 61 34 61 s34 -37 34 -61 c0 -18 -15 -33 -34 -33 Z"/>
-      <path d="M54 82 V42 H66 a13 13 0 0 1 0 26 H54" fill="none" stroke="#0d3fb0"
+      <path d="M54 75 V35 H66 a13 13 0 0 1 0 26 H54" fill="none" stroke="#0d3fb0"
         stroke-width="12" stroke-linecap="round" stroke-linejoin="round"/>
     </svg>
   </div>
@@ -91,7 +91,7 @@
   <div id="pwa512" class="tile">
     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
       <path fill="#ffffff" d="M64 14 c-19 0 -34 15 -34 33 c0 24 34 61 34 61 s34 -37 34 -61 c0 -18 -15 -33 -34 -33 Z"/>
-      <path d="M54 82 V42 H66 a13 13 0 0 1 0 26 H54" fill="none" stroke="#0d3fb0"
+      <path d="M54 75 V35 H66 a13 13 0 0 1 0 26 H54" fill="none" stroke="#0d3fb0"
         stroke-width="12" stroke-linecap="round" stroke-linejoin="round"/>
     </svg>
   </div>
@@ -99,7 +99,7 @@
   <div id="maskable" class="tile">
     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
       <path fill="#ffffff" d="M64 14 c-19 0 -34 15 -34 33 c0 24 34 61 34 61 s34 -37 34 -61 c0 -18 -15 -33 -34 -33 Z"/>
-      <path d="M54 82 V42 H66 a13 13 0 0 1 0 26 H54" fill="none" stroke="#0d3fb0"
+      <path d="M54 75 V35 H66 a13 13 0 0 1 0 26 H54" fill="none" stroke="#0d3fb0"
         stroke-width="12" stroke-linecap="round" stroke-linejoin="round"/>
     </svg>
   </div>
@@ -110,7 +110,7 @@
     <div class="brand">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
         <path fill="#ffffff" d="M64 14 c-19 0 -34 15 -34 33 c0 24 34 61 34 61 s34 -37 34 -61 c0 -18 -15 -33 -34 -33 Z"/>
-        <path d="M54 82 V42 H66 a13 13 0 0 1 0 26 H54" fill="none" stroke="#0d3fb0"
+        <path d="M54 75 V35 H66 a13 13 0 0 1 0 26 H54" fill="none" stroke="#0d3fb0"
           stroke-width="12" stroke-linecap="round" stroke-linejoin="round"/>
       </svg>
       <div>

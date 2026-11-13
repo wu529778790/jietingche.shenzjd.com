@@ -32,7 +32,7 @@ export function BrandPin({
         d="M64 14 c-19 0 -34 15 -34 33 c0 24 34 61 34 61 s34 -37 34 -61 c0 -18 -15 -33 -34 -33 Z"
       />
       <path
-        d="M54 82 V42 H66 a13 13 0 0 1 0 26 H54"
+        d="M54 75 V35 H66 a13 13 0 0 1 0 26 H54"
         fill="none"
         stroke={letterColor}
         strokeWidth="12"
