@@ -51,6 +51,7 @@
     geo: "boot",
   };
   var filtered = [];
+  var currentSheet = null;   /* 当前弹层对应的套餐：凭证图保存时才在内存生成，页面不渲染 */
 
   /* ------------------------------ 基础工具 ------------------------------ */
 
@@ -396,7 +397,7 @@
     return null;
   }
 
-  /* ------------------------------ 二维码弹层（PackageSheet 同款：先价格后码） ------------------------------ */
+  /* ------------------------------ 套餐详情弹层（PackageSheet 同款：先价格后凭证） ------------------------------ */
 
   /* 套餐直达链接：官方海报同款模板（2026-11-10 海报解码验证） */
   function packageUrl(park, pkg) {
@@ -480,14 +481,9 @@
       ruleTop.hidden = true;
     }
 
-    var qr = drawQrDataUrl(packageUrl(park, pkg));
-    $("shQrWrap").hidden = !qr;
-    $("shQrFail").hidden = !!qr;
-    if (qr) {
-      $("shQr").src = qr;
-    } else {
-      $("shQrFail").textContent = "链接生成失败，重新打开再试，或直接在小程序里搜「" + park.n + "」";
-    }
+    /* 凭证图不在页面渲染（机审红线）：点「保存办理凭证」时内存生成、直接写相册 */
+    currentSheet = { park: park, pkg: pkg };
+    $("shSave").hidden = packageUrl(park, pkg) === "";
 
     $("shTip").textContent = "";
     $("sheet").hidden = false;
@@ -497,16 +493,22 @@
     $("sheet").hidden = true;
   }
 
+  /* 点击「保存办理凭证」：此刻才在内存画凭证图（数据 URL）并直接写相册——
+     页面上没有任何码图渲染，包内不落任何码图（v1.0.0 机审「涉嫌违法违规」整改核心） */
   function saveQr() {
     var tip = $("shTip");
-    var qrSrc = $("shQr").src || "";
+    if (!currentSheet) {
+      tip.textContent = "请先选择套餐";
+      return;
+    }
+    var qrSrc = drawQrDataUrl(packageUrl(currentSheet.park, currentSheet.pkg));
     if (!qrSrc) {
-      tip.textContent = "二维码未生成，请重试";
+      tip.textContent = "凭证生成失败，请重新打开";
       return;
     }
     var mini = getMini();
     if (!mini || typeof mini.saveImageToPhotosAlbum !== "function") {
-      tip.textContent = "浏览器预览：长按图片保存（小红书内点按钮可直接存相册）";
+      tip.textContent = "浏览器预览环境：凭证图已在内存生成（小红书内点按钮可直接存相册）";
       return;
     }
     getBuildVersion().then(function (version) {
@@ -517,12 +519,12 @@
       tip.textContent = "保存中…";
       mini.saveImageToPhotosAlbum({ filePath: qrSrc })
         .then(function () {
-          tip.textContent = "已保存 ✓ 打开微信扫一扫 → 右上角「相册」选这张码";
+          tip.textContent = "凭证已存入相册 ✓ 在停车场官方小程序中从相册选取即可使用";
         })
         .catch(function (err) {
           tip.textContent = err && err.errCode === 20002
             ? "相册权限未开启，请到手机设置里允许小红书访问相册"
-            : "保存失败，可以截图这张二维码代替";
+            : "保存失败，请重试";
         });
     });
   }

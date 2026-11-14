@@ -418,24 +418,6 @@ body { background: var(--background); color: var(--foreground); }
   color: var(--brand);
   margin-right: 4px;
 }
-.qr-card {
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  background: #fff;
-  padding: 8px;
-  margin-bottom: 12px;
-  text-align: center;
-}
-.qr-card img { width: 200px; max-width: 100%; height: 200px; display: block; margin: 0 auto; }
-.qr-fail {
-  border: 1px dashed var(--border);
-  border-radius: 12px;
-  padding: 24px 16px;
-  margin-bottom: 12px;
-  text-align: center;
-  font-size: 13px;
-  color: var(--muted);
-}
 .block-btn { display: block; width: 100%; padding: 11px 0; font-size: 15px; border-radius: 12px; }
 .sh-tip { text-align: center; font-size: 12px; color: var(--brand); min-height: 16px; margin-top: 8px; }
 .sh-guide {

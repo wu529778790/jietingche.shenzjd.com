@@ -282,16 +282,12 @@ const cityIndex = cityList.map((x, i) => ({
   f: x.c === inlineCity ? "" : `c${i}.js`,
 }));
 
-/* ------------------------------ 2. 兜底推广码 base64 ------------------------------ */
+/* ------------------------------ 2. 组装 dist（入口在根，城市数据进 assets/） ------------------------------ */
 
-const globalUrl = `https://m.jparking.cn/search-stall?shareCode=${shareCode}&sourceId=FXFX01`;
-const qrBuf = await QRCode.toBuffer(globalUrl, {
-  width: 600,
-  margin: 2,
-  errorCorrectionLevel: "M",
-});
+/* 兜底码图不再烙进包里：包内任何静态二维码图案都是机审「诱导站外交易」的直接命中点
+   （v1.0.0 即因此被拒「涉嫌违法违规」）。凭证图一律运行时内存生成、点击即写相册，
+   页面永不渲染、包内永不落盘。 */
 
-/* ------------------------------ 3. 组装 dist（入口在根，城市数据进 assets/） ------------------------------ */
 
 rmSync(DIST, { recursive: true, force: true });
 mkdirSync(resolve(DIST, "assets"), { recursive: true });
@@ -310,7 +306,7 @@ writeFileSync(
 );
 writeFileSync(
   resolve(DIST, "qr-data.js"),
-  `window.__JTC_QR__={global:"data:image/png;base64,${qrBuf.toString("base64")}"};\n`
+  `window.__JTC_QR__={global:""};\n`
   + `window.__JTC_SHARE__=${JSON.stringify(shareCode)};\n`
 );
 
@@ -444,5 +440,5 @@ const totalPark = cityList.reduce((s, x) => s + x.n, 0);
 console.log(`目标：${TARGET.label}（${TARGET.dist}）${restrictParks ? "｜试水包" : ""}`);
 console.log(`城市：${cityList.length} 个｜车场 ${totalPark}｜套餐 ${totalPkg}${skippedDeposit ? `｜已过滤付定金 ${skippedDeposit} 条` : ""}`);
 console.log(`内联城市：${inlineCity}（data.js ${(JSON.stringify(inline.parks).length / 1024).toFixed(0)}KB）｜城市分包 ${cityFiles} 个共 ${(cityBytes / 1024).toFixed(0)}KB`);
-console.log(`兜底码：${globalUrl}`);
+console.log(`兜底码：无（包内不落码图，凭证图运行时内存生成）｜shareCode：${shareCode}`);
 console.log(`上传包：${zipPath}`);
