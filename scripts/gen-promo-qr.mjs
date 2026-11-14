@@ -9,8 +9,8 @@
  *   https://m.jparking.cn/carParkDetail?detailTab=service&sourceId=FXFX02
  *     &showPackageId={package_id}&parkCode={park_code}&shareCode={shareCode}
  *
- * ⚠️ shareCode 稳定性还没验证（码内嵌疑似生成时间戳），全量跑之前先按
- *    reference/promo-qr-research.md 第五节再出两张官方海报对比。
+ * shareCode 稳定性已验证（2026-11-14 真机复扫 4~5 天前的官方海报码仍可下单，H1 成立），
+ * 静态出码成立；脚本仍要求显式给范围，避免一条命令误糊出几万张。
  *
  * 用法：
  *   node --no-warnings scripts/gen-promo-qr.mjs --limit 20        试跑 20 张
@@ -64,8 +64,8 @@ if (!existsSync(SRC)) {
 }
 
 if (!wantGlobal && !onlyPark && !onlyCity && !limit) {
-  console.error("shareCode 稳定性未验证，拒绝无范围全量出码。");
-  console.error("请加 --limit N 试跑，或用 --city / --park 圈定范围。");
+  console.error("拒绝无范围全量出码（14 万张级别的文件量，误操作代价太大）。");
+  console.error("请用 --city / --park 圈定范围，或显式给 --limit N（全量就给个足够大的上界）。");
   process.exit(1);
 }
 
