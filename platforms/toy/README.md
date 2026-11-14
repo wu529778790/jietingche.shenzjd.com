@@ -23,7 +23,17 @@ npm run toy -- --snapshot data/jtc-snapshot.json --city 广州市
 ## 发布
 
 B 站有官方 CLI（`bilibili/toy` 仓库的 skills/toy），流程与 redapp 类似：登录 → 上传 → 预览 → 提交审核。
-发布时还要选分发方式（`PUBLIC_BIP` / `LINK_ONLY` / `PASSWORD`），这个在 CLI 参数里给，不写进包。
+发布时还要选分发方式，这个在 CLI 参数里给，不写进包（CLI 实际取值 `link-only` / `password` / `public`，默认 link-only）。
+
+安装：`curl -fsSL https://boss.hdslb.com/toy-cli/toy/install.sh | bash`（装到 `~/.local/bin/toy`）。
+AI 调用一律带 `--json`；带包体的 create/update 默认只出预览链接，`--yes` 才真正提交审核。
+
+**门槛：Toy 是内测制，登录即要白名单。** 2026-11-14 首次 `toy login` 被拒
+（`当前账号未在 Toy CLI 白名单内`）。申请入口：PC 端创作中心侧边栏的 Toy 入口，
+没有的话走官方答疑帖（opus/1241171666570051585）里的申请链接。
+资格下来后本地已全部就绪：CLI v0.6.6、`dist/zhao-tingche-toy.zip`（实测全量包约 1MB，非上面估的 3MB）、
+封面 `reference/brand/covers/cover-4x3.png`（Toy 卡片推荐 4:3 横版，已从 16:9 左对齐裁出），
+`toy_doctor.py` 预检通过（唯一 WARN：产物文件名无内容指纹，手写构建、包体小，可接受）。
 
 ## 待第一次上传确认的点
 

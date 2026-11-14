@@ -1,7 +1,8 @@
-/* 泊月·小红书小工具 v2
+/* 泊月·小红书小工具 v3 —— UI 对齐线上站（src/components/HomeSearch/ParkCard/FilterSheet/LocationSheet/PackageSheet）
  * ES2017（Chrome 61 基线），无外部依赖，经典脚本（无 import/export）。
+ * 数据层（过滤/排序/定位/切城/出码/保存）沿用 v2 实现；渲染层换成站点同款。
  * 平台 API 调用前先做方法存在性检测 + buildVersion 版本门禁（js-api.md 规范）：
- *   getLocation 9.49+ / saveImageToPhotosAlbum 9.42+，低版本走降级提示。
+ *   getLocation 9.49+ / saveImageToPhotosAlbum 9.42+ / setStorage 9.46+，低版本走降级提示。
  */
 (function () {
   "use strict";
@@ -12,8 +13,23 @@
   var QR_GLOBAL = (window.__JTC_QR__ && window.__JTC_QR__.global) || "";
   var SHARE_CODE = window.__JTC_SHARE__ || "";
 
+  /* 展示常量与站点 src/lib/types.ts 对齐 */
   var TYPE_LABEL = { "1": "月卡", "2": "日卡", "3": "次卡", "4": "年卡", "5": "半年卡", "6": "季卡" };
+  var TYPE_ORDER = ["1", "6", "5", "4", "2", "3"];            // 月/季/半年/年/日/次（站点 PACKAGE_TYPES 顺序）
   var SLOT_LABEL = { "0": "全天", "1": "白天", "2": "夜间" };
+  var SLOT_ORDER = ["0", "1", "2"];                            // 站点 TIME_SLOTS：全天/白天/夜间
+  var INDUSTRIES = ["商场", "写字楼", "医院", "景区", "社区", "交通枢纽", "其他"];
+  /* 价格上限档位（站点 PRICE_STEPS：按折合月价，单位分） */
+  var PRICE_STEPS = [
+    { value: 0, label: "不限" },
+    { value: 10000, label: "月均 ¥100 内" },
+    { value: 20000, label: "月均 ¥200 内" },
+    { value: 30000, label: "月均 ¥300 内" },
+    { value: 50000, label: "月均 ¥500 内" },
+  ];
+  /* 官方数据不带精确时长，按类型码推算标准天数折合月价（与站点 monthlyPrice 口径一致） */
+  var TYPE_DAYS = { "1": 30, "2": 1, "3": 1, "4": 365, "5": 180, "6": 90 };
+
   var PAGE_SIZE = 30;
   var LOC_MIN_VERSION = 9490;      // getLocation 需客户端 9.49+
   var SAVE_MIN_VERSION = 9420;     // saveImageToPhotosAlbum 需客户端 9.42+
@@ -24,12 +40,15 @@
     industry: "",
     type: "",
     slot: "",
-    sort: "price",
+    maxPrice: 0,
+    sort: "recommend",
     lat: null,
     lng: null,
     page: 1,
-    expanded: {},
     cityFile: "",
+    /* boot=首帧未定位 / locating=定位请求进行中 / idle=出真列表。
+       boot/locating 期间列表区出骨架屏——先给一份「错的推荐」不如给一块占位 */
+    geo: "boot",
   };
   var filtered = [];
 
@@ -87,19 +106,41 @@
     return m < 1000 ? Math.round(m) + "m" : (m / 1000).toFixed(1) + "km";
   }
 
-  function minPriceOf(list) {
+  /* 折合月价（分/月）：官方数据无精确时长，按类型码推算；日/次卡折算后必然排后，与站点口径一致 */
+  function monthlyPriceOf(pkg) {
+    var days = TYPE_DAYS[pkg.t] || 30;
+    return Math.round((pkg.pr || 0) * 30 / days);
+  }
+
+  function minMonthlyOf(list) {
     var min = Infinity;
     for (var i = 0; i < list.length; i++) {
-      var pr = list[i].pr;
-      if (pr > 0 && pr < min) min = pr;
+      var v = monthlyPriceOf(list[i]);
+      if (v > 0 && v < min) min = v;
     }
     return min === Infinity ? 0 : min;
   }
 
-  /* ------------------------------ 筛选 / 排序 ------------------------------ */
+  /* 规则展示层简写（数据原文不动）：官方「X 00:00-23:59」压成「X 全天」式短句 */
+  function ruleShort(text) {
+    return String(text || "")
+      .replace(/每天\s*00:00-23:59/g, "全天可停")
+      .replace(/(工作日|周末|节假日)\s*00:00-23:59/g, "$1全天");
+  }
+
+  /* 套餐标签：类型 + 时段（全天不重复展示） */
+  function pkgLabel(k) {
+    var parts = [];
+    if (TYPE_LABEL[k.t]) parts.push(TYPE_LABEL[k.t]);
+    if (k.v !== "0" && SLOT_LABEL[k.v]) parts.push(SLOT_LABEL[k.v]);
+    return parts.join(" · ") || "套餐";
+  }
+
+  /* ------------------------------ 筛选 / 排序（数据层） ------------------------------ */
 
   function applyFilters() {
     var kw = state.kw.trim().toLowerCase();
+    var located = state.lat != null && state.lng != null;
     var arr = [];
     for (var i = 0; i < DATA.parks.length; i++) {
       var p = DATA.parks[i];
@@ -111,20 +152,28 @@
         var k = p.p[j];
         if (state.type && k.t !== state.type) continue;
         if (state.slot && k.v !== state.slot) continue;
+        if (state.maxPrice > 0 && monthlyPriceOf(k) > state.maxPrice) continue;
         pkgs.push(k);
       }
       if (!pkgs.length) continue;
       pkgs.sort(function (a, b) { return (a.pr || 0) - (b.pr || 0); });
-      arr.push({ park: p, pkgs: pkgs, d: null, min: minPriceOf(pkgs) });
+      var item = { park: p, key: p.n + "|" + (p.a || ""), pkgs: pkgs, d: null, min: minMonthlyOf(pkgs) };
+      if (located) {
+        var g = p.g || [0, 0];
+        item.d = haversine(state.lat, state.lng, g[1], g[0]);
+      }
+      arr.push(item);
     }
 
-    var located = state.lat != null && state.lng != null;
     if (state.sort === "dist" && located) {
-      for (var m = 0; m < arr.length; m++) {
-        var g = arr[m].park.g || [0, 0];
-        arr[m].d = haversine(state.lat, state.lng, g[1], g[0]);
-      }
       arr.sort(function (a, b) { return a.d - b.d; });
+    } else if (state.sort === "recommend" && located) {
+      /* 站点推荐排序：距离圈层（≤1km/≤3km/≤10km/更远）优先，同圈层内月均价升序 */
+      function ring(d) { return d <= 1000 ? 0 : d <= 3000 ? 1 : d <= 10000 ? 2 : 3; }
+      arr.sort(function (a, b) {
+        var ra = ring(a.d), rb = ring(b.d);
+        return ra !== rb ? ra - rb : a.min - b.min;
+      });
     } else {
       arr.sort(function (a, b) { return a.min - b.min; });
     }
@@ -132,165 +181,204 @@
     filtered = arr;
     state.page = 1;
     renderList();
+    updateToolbar();
   }
 
-  /* ------------------------------ 筛选抽屉（对齐官方分享中心交互） ------------------------------ */
+  /* ------------------------------ 吸顶工具条（位置/筛选/排序/清空） ------------------------------ */
 
-  var draft = { district: "", industry: "", type: "", slot: "" };
+  function updateToolbar() {
+    var locPill = $("btnLoc");
+    var label = DATA.city ? cityShort(DATA.city) : "位置";
+    if (state.district) label += " · " + state.district;
+    locPill.textContent = label;
+    locPill.className = "filter-pill shrink" + (DATA.city || state.district ? " on" : "");
+
+    var dirty = state.kw.trim() || state.district || state.industry || state.type
+      || state.slot || state.maxPrice > 0 || state.sort !== "recommend";
+    $("btnReset").hidden = !dirty;
+
+    $("sortDist").className = "filter-pill"
+      + (state.sort === "dist" ? " on" : state.lat == null ? " dim" : "");
+    $("sortRec").className = "filter-pill" + (state.sort === "recommend" ? " on" : "");
+    $("sortPrice").className = "filter-pill" + (state.sort === "price" ? " on" : "");
+  }
 
   function updateFilterBadge() {
-    var n = (state.district ? 1 : 0) + (state.industry ? 1 : 0)
-      + (state.type ? 1 : 0) + (state.slot ? 1 : 0);
+    var n = (state.industry ? 1 : 0) + (state.type ? 1 : 0)
+      + (state.slot ? 1 : 0) + (state.maxPrice > 0 ? 1 : 0);
     var badge = $("filterBadge");
     badge.textContent = n;
     badge.hidden = n === 0;
   }
 
+  function setSort(sort) {
+    state.sort = sort;
+    applyFilters();
+  }
+
+  /* ------------------------------ 筛选弹层（FilterSheet 同款四维，确定才生效） ------------------------------ */
+
+  var draft = { industry: "", type: "", slot: "", maxPrice: 0 };
+
   function fButtonHtml(section, code, label) {
-    var on = draft[section] === code;
+    var on = String(draft[section]) === String(code);
     return '<button class="fbtn' + (on ? " on" : "") + '" data-sec="' + section + '" data-v="' + esc(code) + '">'
       + esc(label) + "</button>";
   }
 
   function renderFilterPanel() {
-    var industries = {};
-    var types = {};
+    /* 只展示当前城市数据里真实存在的取值，顺序对齐站点常量 */
+    var industries = {}, types = {};
     for (var i = 0; i < DATA.parks.length; i++) {
-      industries[DATA.parks[i].i] = 1;
+      if (DATA.parks[i].i) industries[DATA.parks[i].i] = 1;
       var pp = DATA.parks[i].p;
       for (var j = 0; j < pp.length; j++) types[pp[j].t] = 1;
     }
-    var inds = Object.keys(industries).sort();
-    var typeCodes = Object.keys(types).sort(function (a, b) { return Number(a) - Number(b); });
-
-    // 所在区域（当前城市，按车场量降序）
-    var districts = {};
-    for (var di = 0; di < DATA.parks.length; di++) {
-      var dv = DATA.parks[di].d;
-      if (dv) districts[dv] = (districts[dv] || 0) + 1;
-    }
-    var dts = Object.keys(districts).sort(function (a, b) { return districts[b] - districts[a]; });
+    var inds = [];
+    for (var a = 0; a < INDUSTRIES.length; a++) if (industries[INDUSTRIES[a]]) inds.push(INDUSTRIES[a]);
+    var typeCodes = [];
+    for (var b = 0; b < TYPE_ORDER.length; b++) if (types[TYPE_ORDER[b]]) typeCodes.push(TYPE_ORDER[b]);
 
     var html = "";
-    // 停放时间（官方面板顺序：白天/夜间/全天；不选 = 全部）
-    html += '<div class="fsec"><div class="fsec-title">停放时间</div><div class="fgrid">';
-    html += fButtonHtml("slot", "1", SLOT_LABEL["1"]);
-    html += fButtonHtml("slot", "2", SLOT_LABEL["2"]);
-    html += fButtonHtml("slot", "0", SLOT_LABEL["0"]);
-    html += "</div></div>";
-
-    // 套餐类型
-    html += '<div class="fsec"><div class="fsec-title">套餐类型</div><div class="fgrid">';
-    for (var t = 0; t < typeCodes.length; t++) {
-      var c = typeCodes[t];
-      html += fButtonHtml("type", c, TYPE_LABEL[c] || c);
-    }
-    html += "</div></div>";
-
-    // 所在区域
-    if (dts.length > 1) {
-      html += '<div class="fsec"><div class="fsec-title">所在区域</div><div class="fgrid">';
-      for (var k = 0; k < dts.length; k++) {
-        html += fButtonHtml("district", dts[k], dts[k]);
-      }
-      html += "</div></div>";
-    }
-
-    // 业态（自有维度）
     html += '<div class="fsec"><div class="fsec-title">业态</div><div class="fgrid">';
-    for (var k = 0; k < inds.length; k++) {
-      html += fButtonHtml("industry", inds[k], inds[k]);
+    html += fButtonHtml("industry", "", "全部");
+    for (var m = 0; m < inds.length; m++) html += fButtonHtml("industry", inds[m], inds[m]);
+    html += "</div></div>";
+
+    html += '<div class="fsec"><div class="fsec-title">套餐类型</div><div class="fgrid">';
+    html += fButtonHtml("type", "", "全部");
+    for (var t = 0; t < typeCodes.length; t++) {
+      html += fButtonHtml("type", typeCodes[t], TYPE_LABEL[typeCodes[t]] || typeCodes[t]);
+    }
+    html += "</div></div>";
+
+    html += '<div class="fsec"><div class="fsec-title">停放时间</div><div class="fgrid">';
+    html += fButtonHtml("slot", "", "全部");
+    for (var s = 0; s < SLOT_ORDER.length; s++) {
+      html += fButtonHtml("slot", SLOT_ORDER[s], SLOT_LABEL[SLOT_ORDER[s]]);
+    }
+    html += "</div></div>";
+
+    html += '<div class="fsec"><div class="fsec-title">价格上限</div><div class="fgrid">';
+    for (var pr = 0; pr < PRICE_STEPS.length; pr++) {
+      html += fButtonHtml("maxPrice", PRICE_STEPS[pr].value, PRICE_STEPS[pr].label);
     }
     html += "</div></div>";
 
     $("fbody").innerHTML = html;
+  }
 
-    var btns = $("fbody").querySelectorAll(".fbtn");
-    for (var b = 0; b < btns.length; b++) {
-      btns[b].addEventListener("click", function (e) {
-        var el = e.currentTarget;
-        var sec = el.getAttribute("data-sec");
-        var v = el.getAttribute("data-v") || "";
-        draft[sec] = draft[sec] === v ? "" : v;
-        renderFilterPanel();
-      });
-    }
+  function bindFilterPanel() {
+    $("fbody").addEventListener("click", function (e) {
+      var el = e.target.closest ? e.target.closest(".fbtn") : null;
+      if (!el) return;
+      var sec = el.getAttribute("data-sec");
+      var v = el.getAttribute("data-v") || "";
+      if (sec === "maxPrice") v = Number(v) || 0;
+      draft[sec] = (String(draft[sec]) === String(v)) ? (sec === "maxPrice" ? 0 : "") : v;
+      renderFilterPanel();
+    });
   }
 
   function openFilterPanel() {
-    draft = { district: state.district, industry: state.industry, type: state.type, slot: state.slot };
+    draft = {
+      industry: state.industry,
+      type: state.type,
+      slot: state.slot,
+      maxPrice: state.maxPrice,
+    };
     renderFilterPanel();
     $("fpanel").hidden = false;
   }
 
   function commitFilter() {
-    state.district = draft.district;
     state.industry = draft.industry;
     state.type = draft.type;
     state.slot = draft.slot;
+    state.maxPrice = draft.maxPrice;
     updateFilterBadge();
     applyFilters();
     $("fpanel").hidden = true;
   }
 
-  function pkgTagsHtml(k) {
-    var tags = [];
-    if (TYPE_LABEL[k.t]) tags.push(TYPE_LABEL[k.t]);
-    if (SLOT_LABEL[k.v]) tags.push(SLOT_LABEL[k.v]);
+  /* ------------------------------ 车场卡（ParkCard 同款：chips 直点出码） ------------------------------ */
+
+  function chipHtml(item, k) {
+    var origin = k.po > k.pr ? '<span class="chip-origin">¥' + yuan(k.po) + "</span>" : "";
+    var month = TYPE_DAYS[k.t] >= 60
+      ? '<div class="chip-month">折合 ¥' + yuan(monthlyPriceOf(k)) + "/月</div>"
+      : "";
+    return '<button class="pkg-chip" data-park="' + esc(item.key) + '" data-pkg="' + esc(k.id) + '">'
+      + '<div class="chip-label">' + esc(pkgLabel(k)) + "</div>"
+      + '<div class="chip-price">' + (k.pr > 0 ? "¥" + yuan(k.pr) : "见码") + origin + "</div>"
+      + month
+      + "</button>";
+  }
+
+  function cardHtml(item) {
+    var p = item.park;
+    var dist = item.d != null ? '<span class="tag tag-brand">' + distText(item.d) + "</span>" : "";
+    var industry = p.i ? '<span class="tag tag-muted">' + esc(p.i) + "</span>" : "";
+    var sub = (p.d ? p.d : "") + (p.i ? " · " + p.i : "") + (p.a ? " · " + p.a : "");
+    var chips = "";
+    var shown = Math.min(item.pkgs.length, 6);
+    for (var i = 0; i < shown; i++) chips += chipHtml(item, item.pkgs[i]);
+    if (item.pkgs.length > 6) chips += '<span class="chip-more">还有 ' + (item.pkgs.length - 6) + " 个套餐</span>";
+    return '<div class="card">'
+      + '<div class="card-hd">'
+      + '<div class="card-main">'
+      + '<div class="card-name">' + esc(p.n) + "</div>"
+      + '<div class="card-sub">' + esc(sub) + "</div>"
+      + "</div>"
+      + '<div class="card-tags">' + industry + dist + "</div>"
+      + "</div>"
+      + '<div class="pkg-chips">' + chips + "</div>"
+      + "</div>";
+  }
+
+  function skeletonHtml() {
     var html = "";
-    for (var i = 0; i < tags.length; i++) html += "<span>" + esc(tags[i]) + "</span>";
+    for (var i = 0; i < 4; i++) {
+      html += '<div class="skel-card">'
+        + '<div class="skel-line w50"></div><div class="skel-line w75"></div>'
+        + '<div class="skel-chips"><div class="skel-chip"></div><div class="skel-chip"></div><div class="skel-chip"></div></div>'
+        + "</div>";
+    }
     return html;
   }
 
-  function pkgRowHtml(key, k) {
-    var origin = k.po > k.pr ? '<span class="pkg-origin">原价 ' + yuan(k.po) + " 元</span>" : "";
-    return '<div class="pkg" data-park="' + esc(key) + '" data-pkg="' + esc(k.id) + '">'
-      + '<div class="pkg-name">' + esc(k.n) + "</div>"
-      + '<div class="pkg-tags">' + pkgTagsHtml(k) + "</div>"
-      + '<div class="pkg-ft">'
-      + '<span class="pkg-price">' + yuan(k.pr) + " 元</span>" + origin
-      + '<span class="pkg-btn" data-park="' + esc(key) + '" data-pkg="' + esc(k.id) + '">扫码办卡</span>'
-      + "</div>"
-      + (k.ru ? '<div class="pkg-rule">' + esc(k.ru) + "</div>" : "")
-      + "</div>";
-  }
-
-  function cardHtml(item, idx) {
-    var p = item.park;
-    var key = p.n + "|" + (p.a || "");
-    var dist = item.d != null ? '<span class="card-dist">' + distText(item.d) + "</span>" : "";
-    var open = !!state.expanded[key];
-    var html = '<div class="card" data-idx="' + idx + '" data-key="' + esc(key) + '">'
-      + '<div class="card-hd"><div class="card-name">' + esc(p.n) + "</div>" + dist + "</div>"
-      + '<div class="card-sub">' + esc((p.d ? p.d + " · " : "") + (p.i || "") + (p.a ? " · " + p.a : "")) + "</div>"
-      + '<div class="card-meta">'
-      + '<span class="card-price">最低<b>' + yuan(item.min) + "</b>元起</span>"
-      + '<span class="card-count">' + item.pkgs.length + " 个套餐</span>"
-      + '<span class="card-arrow">' + (open ? "收起▲" : "展开▼") + "</span>"
-      + "</div>";
-    if (open) {
-      html += '<div class="pkgs">';
-      for (var i = 0; i < item.pkgs.length; i++) html += pkgRowHtml(key, item.pkgs[i]);
-      html += "</div>";
-    }
-    return html + "</div>";
-  }
-
   function renderList() {
+    if (state.geo !== "idle" || locatingHard) {
+      $("list").innerHTML = skeletonHtml();
+      $("sentinel").hidden = true;
+      $("noMore").hidden = true;
+      return;
+    }
     var shown = state.page * PAGE_SIZE;
     var end = Math.min(shown, filtered.length);
     var html = "";
-    for (var i = 0; i < end; i++) html += cardHtml(filtered[i], i);
-    if (!filtered.length) html = '<div class="empty">没有符合条件的套餐，换个筛选试试</div>';
+    for (var i = 0; i < end; i++) html += cardHtml(filtered[i]);
+
+    if (!filtered.length) {
+      var kw = state.kw.trim();
+      html = '<div class="empty"><div class="empty-title">没找到匹配的车场</div>';
+      if (kw) {
+        html += '<div class="empty-sub">站里收录的是具体车场、楼宇和小区名，<br>换个名称试试，或者直接按位置看。</div>'
+          + '<div class="empty-btns">'
+          + '<button class="btn-brand-solid" id="btnNearMe" type="button">按我的位置找附近</button>'
+          + '<button class="btn-brand-line" id="btnWholeCity" type="button">看' + esc(cityShort(DATA.city) || "全部") + "车场</button>"
+          + "</div>";
+      } else {
+        html += '<div class="empty-sub">当前筛选条件下没有车场，放宽业态 / 时段 / 价格试试。</div>'
+          + '<div class="empty-btns"><button class="btn-brand-solid" id="btnClearAll" type="button">清空筛选</button></div>';
+      }
+      html += "</div>";
+    }
     $("list").innerHTML = html;
 
-    var more = $("more");
-    if (filtered.length > shown) {
-      more.hidden = false;
-      more.textContent = "加载更多（还剩 " + (filtered.length - shown) + " 个车场）";
-    } else {
-      more.hidden = true;
-    }
+    /* 「加载更多」按钮已换成滚动哨兵：滑到底自动续页，没有更多时藏哨兵、亮提示 */
+    $("sentinel").hidden = !(filtered.length > shown);
+    $("noMore").hidden = !(filtered.length > 0 && filtered.length <= shown);
   }
 
   function findItem(key) {
@@ -308,27 +396,7 @@
     return null;
   }
 
-  /* ------------------------------ 交互（事件委托，只绑一次） ------------------------------ */
-
-  function bindListEvents() {
-    $("list").addEventListener("click", function (e) {
-      var btn = e.target.closest ? e.target.closest(".pkg-btn") : null;
-      if (btn) {
-        var item = findItem(btn.getAttribute("data-park"));
-        var pkg = item && findPkg(item, btn.getAttribute("data-pkg"));
-        if (item && pkg) openSheet(item.park, pkg);
-        return;
-      }
-      var card = e.target.closest ? e.target.closest(".card") : null;
-      if (card) {
-        var key = card.getAttribute("data-key");
-        state.expanded[key] = !state.expanded[key];
-        renderList();
-      }
-    });
-  }
-
-  /* ------------------------------ 二维码弹层（每个套餐现场画专属直达码） ------------------------------ */
+  /* ------------------------------ 二维码弹层（PackageSheet 同款：先价格后码） ------------------------------ */
 
   /* 套餐直达链接：官方海报同款模板（2026-11-10 海报解码验证） */
   function packageUrl(park, pkg) {
@@ -372,17 +440,55 @@
     return canvas.toDataURL("image/png");
   }
 
-
-  function openSheet(park, pkg) {
+  function openSheet(item, pkg) {
+    var park = item.park;
     $("shPark").textContent = park.n;
-    $("shPark").title = park.n;
-    $("shPkg").innerHTML =
-      '<div class="sh-pkg-name">' + esc(pkg.n) + "</div>"
-      + '<div class="sh-pkg-tags">' + pkgTagsHtml(pkg) + (park.a ? " · " + esc(park.a) : "") + "</div>"
-      + '<div class="sh-pkg-price">' + yuan(pkg.pr) + " 元"
-      + (pkg.po > pkg.pr ? '<small>原价 ' + yuan(pkg.po) + " 元</small>" : "") + "</div>"
-      + (pkg.ru ? '<div class="sh-pkg-rule">' + esc(pkg.ru) + "</div>" : "");
-    $("shQr").src = drawQrDataUrl(packageUrl(park, pkg));
+    /* 地址紧跟车场名（用户看名字时要知道在哪）；容器禁外链，导航只能到站点端用 */
+    var addrTop = $("shAddrTop");
+    if (park.a) {
+      addrTop.textContent = park.a;
+      addrTop.hidden = false;
+    } else {
+      addrTop.hidden = true;
+    }
+    var distBox = $("shDist");
+    if (item.d != null) {
+      distBox.textContent = "距你 " + distText(item.d);
+      distBox.hidden = false;
+    } else {
+      distBox.hidden = true;
+    }
+
+    /* 先给价格和规格，再给码：用户先判断值不值，再决定扫不扫 */
+    var facts = [];
+    if (TYPE_LABEL[pkg.t]) facts.push(TYPE_LABEL[pkg.t]);
+    if (pkg.v !== "0" && SLOT_LABEL[pkg.v]) facts.push(SLOT_LABEL[pkg.v]);
+    var html = pkg.pr > 0 ? '<span class="big-price">¥' + yuan(pkg.pr) + "</span>" : "";
+    if (pkg.po > pkg.pr) html += '<span class="origin">¥' + yuan(pkg.po) + "</span>";
+    if (pkg.pr > 0 && TYPE_DAYS[pkg.t] >= 60) {
+      html += '<span class="per-month">折合 ¥' + yuan(monthlyPriceOf(pkg)) + "/月</span>";
+    }
+    for (var f = 0; f < facts.length; f++) html += '<span class="fact">' + esc(facts[f]) + "</span>";
+    $("shPkg").innerHTML = html;
+
+    /* 可停时段是决策参数不是页脚细则：紧跟标签/价格（数据原文不动，仅显示层简写） */
+    var ruleTop = $("shRule");
+    if (pkg.ru) {
+      ruleTop.textContent = ruleShort(pkg.ru);
+      ruleTop.hidden = false;
+    } else {
+      ruleTop.hidden = true;
+    }
+
+    var qr = drawQrDataUrl(packageUrl(park, pkg));
+    $("shQrWrap").hidden = !qr;
+    $("shQrFail").hidden = !!qr;
+    if (qr) {
+      $("shQr").src = qr;
+    } else {
+      $("shQrFail").textContent = "链接生成失败，重新打开再试，或直接在小程序里搜「" + park.n + "」";
+    }
+
     $("shTip").textContent = "";
     $("sheet").hidden = false;
   }
@@ -440,7 +546,7 @@
     var r = -100.0 + 2.0 * x + 3.0 * y + 0.2 * y * y + 0.1 * x * y + 0.2 * Math.sqrt(Math.abs(x));
     r += (20.0 * Math.sin(6.0 * x * Math.PI) + 20.0 * Math.sin(2.0 * x * Math.PI)) * 2.0 / 3.0;
     r += (20.0 * Math.sin(y * Math.PI) + 40.0 * Math.sin(y / 3.0 * Math.PI)) * 2.0 / 3.0;
-    r += (160.0 * Math.sin(y / 12.0 * Math.PI) + 320.0 * Math.sin(y * Math.PI / 30.0)) * 2.0 / 3.0;
+    r += (160.0 * Math.sin(y / 12.0 * Math.PI) + 320.0 * Math.sin(y / 30.0 * Math.PI)) * 2.0 / 3.0;
     return r;
   }
   function trLng(x, y) {
@@ -451,27 +557,31 @@
     return r;
   }
 
-  function onLocated(lat, lng, btn) {
-    // 定位说了算：无条件切到最近的有数据城市 + 距离排序，不做任何误差判断
+  /* 定位成功：切最近城市 → 按 wantSort 出列表。
+     成功不需要 toast——骨架屏换真实列表就是反馈，排序语义看筛选条的激活态；
+     黄条只留给「定位中 / 失败 / 城市分包加载」这些真正需要说话的时刻 */
+  function onLocated(lat, lng, wantSort, silent) {
     var target = nearestIndexCity(lat, lng);
     var proceed = function () {
-      state.lat = lat;
-      state.lng = lng;
-      if (state.sort !== "dist") {
-        state.sort = "dist";
-        $("sortDist").classList.add("on");
-        $("sortPrice").classList.remove("on");
-      }
-      applyFilters();
-      btn.textContent = "已定位 ✓";
-      btn.classList.remove("off");
+      if (locateTimer) { clearTimeout(locateTimer); locateTimer = null; }
+      /* 「正在获取定位」黄条只属于定位过程：结果一出立即清掉，绝不和结果同屏 */
+      if (noticeTimer) { clearTimeout(noticeTimer); noticeTimer = null; }
+      $("notice").hidden = true;
+      /* 最短骨架展示 600ms：定位极快（权限已开、缓存命中）时也保证过渡不被看成「闪一下」 */
+      var unlock = function () {
+        locatingHard = false;
+        state.geo = "idle";
+        state.lat = lat;
+        state.lng = lng;
+        $("geoRetry").hidden = true;
+        setSort(wantSort);
+      };
+      var elapsed = Date.now() - locateStartedAt;
+      if (elapsed < 600) { setTimeout(unlock, 600 - elapsed); } else { unlock(); }
     };
 
     if (target && target.entry.c !== DATA.city) {
       pickCity(target.entry, function () {
-        if (DATA.city === target.entry.c) {
-          showNotice("已定位到" + cityShort(target.entry.c) + "，已切换本城数据");
-        }
         proceed();
       });
       return;
@@ -479,66 +589,165 @@
     proceed();
   }
 
-  function locateFail(btn, msg) {
-    btn.textContent = msg;
-    btn.classList.add("off");
+  function locateFail(msg) {
+    if (locateTimer) { clearTimeout(locateTimer); locateTimer = null; }
+    var failNow = function () {
+      locatingHard = false;
+      state.geo = "idle";
+      applyFilters();
+    /* 授权动作后 2 秒内就失败 = 系统层早已拒绝定位（平台不会再弹权限窗）：
+       不裸露默认列表，重弹引导卡并写清出路——用户去设置开权限后点卡即成 */
+    if (!silent && locateStartedAt && Date.now() - locateStartedAt < 2000 && getMini()) {
+      $("geoRetry").hidden = true;
+      $("geoDesc").textContent = "定位权限未开启：请到手机「设置」里允许小红书使用定位，再回来点「开启定位」";
+      $("geoPanel").hidden = false;
+      return;
+    }
+    /* 慢速失败（信号/超时等）：黄条说原因，重试条常驻列表顶部给一键重试 */
+    $("geoRetry").hidden = false;
+    showNotice(msg + "。可到手机设置里允许小红书使用定位，或直接点「位置」手动选城市", 12000);
+    };
+    var elapsed = Date.now() - locateStartedAt;
+    if (elapsed < 600) { setTimeout(failNow, 600 - elapsed); } else { failNow(); }
   }
 
   var noticeTimer = null;
-  function showNotice(text) {
+  function showNotice(text, duration) {
     var box = $("notice");
     box.textContent = text;
     box.hidden = false;
     clearTimeout(noticeTimer);
-    noticeTimer = setTimeout(function () { box.hidden = true; }, 6000);
+    noticeTimer = setTimeout(function () { box.hidden = true; }, duration || 6000);
   }
 
   /* 普通浏览器路径：navigator.geolocation（WGS-84）→ 纠偏为 GCJ-02。
      仅当 window.xhs 不存在时才会走到这里；容器内平台分支优先且浏览器定位被禁，双路径互不干扰。 */
-  function browserLocate(btn) {
+  function browserLocate(wantSort) {
     if (!navigator.geolocation || typeof navigator.geolocation.getCurrentPosition !== "function") {
-      locateFail(btn, "此环境不支持定位");
+      locateFail("此环境不支持定位");
       return;
     }
-    btn.textContent = "定位中…";
+    showNotice("正在获取定位，若弹出权限窗口请选择允许", 10000);
     navigator.geolocation.getCurrentPosition(
       function (pos) {
         if (!isFinite(pos.coords.latitude) || !isFinite(pos.coords.longitude)) {
-          locateFail(btn, "定位失败，可手动筛选");
+          locateFail("定位失败");
           return;
         }
         var gcj = wgs2gcj(pos.coords.latitude, pos.coords.longitude);
-        onLocated(gcj[0], gcj[1], btn);
+        onLocated(gcj[0], gcj[1], wantSort);
       },
-      function () { locateFail(btn, "未授权定位，可手动筛选"); },
+      function (err) {
+        var why = err && err.code === 1 ? "定位权限被拒绝" : err && err.code === 3 ? "定位超时" : "位置不可用";
+        locateFail(why + (err && err.code ? "（" + err.code + "）" : ""));
+      },
       { enableHighAccuracy: false, timeout: 8000, maximumAge: 60000 }
     );
   }
 
-  function locate() {
-    var btn = $("btnLoc");
+  /* silent = 自动定位（进页面）：失败不打扰首屏；手动触发才给完整提示 */
+  var locateTimer = null;
+  var locateStartedAt = 0;
+  /* 定位硬锁：置位期间列表区无条件只渲染骨架，唯一解锁口是拿到定位结果（成功/终态失败）。
+     用户要求「授权到拿到地址之前只看到加载」——不依赖状态机各分支的自觉，锁是最终保证 */
+  var locatingHard = false;
+  function locate(wantSort, silent) {
+    locateStartedAt = Date.now();
+    locatingHard = true;
+    state.geo = "locating";
+    renderList();
+    if (locateTimer) clearTimeout(locateTimer);
+    /* 超时多半是权限弹窗上停留 + 定位本身耗时（授权到拿地址之间必须一直是骨架/引导，
+       不能裸露默认列表）——重弹引导卡给第二次机会，而不是露出错误推荐 */
+    locateTimer = setTimeout(function () {
+      if (state.geo !== "locating") return;
+      locatingHard = false;
+      state.geo = "idle";
+      applyFilters();
+      if (state.lat == null) {
+        $("geoPanel").hidden = false;
+        showNotice("定位没有完成，请再试一次", 8000);
+      }
+    }, 20000);
     var mini = getMini();
     if (mini && typeof mini.getLocation === "function") {
       // 小红书容器：平台定位，返回即 GCJ-02
       getBuildVersion().then(function (version) {
         if (version && !clientVersionAtLeast(version, LOC_MIN_VERSION)) {
-          locateFail(btn, "小红书版本过低，无法定位");
+          if (!silent) locateFail("小红书版本过低，无法定位");
           return;
         }
-        btn.textContent = "定位中…";
+        if (!silent) showNotice("正在获取定位，若弹出权限窗口请选择允许", 10000);
         mini.getLocation({ type: "gcj02" })
           .then(function (loc) {
             if (isFinite(loc.latitude) && isFinite(loc.longitude)) {
-              onLocated(loc.latitude, loc.longitude, btn);
-            } else {
-              locateFail(btn, "定位失败，可手动筛选");
+              onLocated(loc.latitude, loc.longitude, wantSort, silent);
+            } else if (!silent) {
+              locateFail("定位失败");
             }
           })
-          .catch(function () { locateFail(btn, "未授权定位，可手动筛选"); });
+          .catch(function (err) {
+            if (!silent) {
+              locateFail("定位未成功" + (err && err.errCode ? "（错误码 " + err.errCode + "）" : "（未授权或定位不可用）"));
+            }
+          });
       });
       return;
     }
-    browserLocate(btn);
+    if (!silent) browserLocate(wantSort); // 浏览器调试环境不自动弹权限
+  }
+
+  /* 定位引导：官方 §3.12 要求定位由用户手势触发，页面加载期的自动调用会被平台拦掉——
+     每次进页面（还没定位）都弹引导卡，用户点「开启定位」（手势）后立刻定位；
+     点「暂不」只关掉本次的卡，下次进来继续引导，直到定位成功为止 */
+  function checkGeoAsk() {
+    if (state.lat != null) return;
+    var mini = getMini();
+    if (!mini || typeof mini.getLocation !== "function") {
+      /* 浏览器调试环境：无平台定位能力，跳过引导直接出默认列表 */
+      state.geo = "idle";
+      applyFilters();
+      return;
+    }
+    $("geoDesc").textContent = "按你的位置推荐附近能办月卡的车场，远近一目了然";
+    $("geoPanel").hidden = false;
+  }
+
+  /* ------------------------------ 容器顶栏避让（fullscreen-experience.md 处方） ------------------------------ */
+
+  /* getWindowInfo（在线文档 §3.11，9.49+）：容器坐标系以容器左上角为原点，
+     menuButtons.back/me/share 是宿主按钮的真实矩形——按钮底缘就是遮挡线，
+     优先用它；没有按钮矩形再退 safeArea.top / statusBarHeight。
+     结果写进 --page-top（hero 与吸顶工具条避让）；探测失败保持 env(safe-area) 兜底。
+     文档要求窗口变化后重取——监听一次 resize。 */
+  function applyHostTop() {
+    try {
+      var mini = getMini();
+      if (!mini || typeof mini.getWindowInfo !== "function") return;
+      var apply = function (info) {
+        if (!info) return;
+        var top = 0;
+        var btns = info.menuButtons || {};
+        var names = ["back", "me", "share"];
+        for (var i = 0; i < names.length; i++) {
+          var b = btns[names[i]];
+          if (b && Number(b.bottom)) top = Math.max(top, Number(b.bottom));
+        }
+        if (!top && info.safeArea && Number(info.safeArea.top)) top = Number(info.safeArea.top);
+        if (!top && Number(info.statusBarHeight)) top = Number(info.statusBarHeight);
+        if (top > 0) {
+          document.documentElement.style.setProperty("--page-top", Math.ceil(top + 6) + "px");
+        }
+      };
+      var queryWin = function () {
+        getBuildVersion().then(function (version) {
+          if (version && !clientVersionAtLeast(version, LOC_MIN_VERSION)) return;
+          return mini.getWindowInfo().then(apply).catch(function () { /* env() 兜底 */ });
+        });
+      };
+      queryWin();
+      window.addEventListener("resize", queryWin);
+    } catch (e) { /* 保持 env() 兜底 */ }
   }
 
   /* ------------------------------ 城市切换（assets 按需加载 + 选择记忆） ------------------------------ */
@@ -590,24 +799,20 @@
     state.industry = "";
     state.type = "";
     state.slot = "";
+    state.maxPrice = 0;
     state.page = 1;
-    state.expanded = {};
     updateFilterBadge();
-    $("cityTag").textContent = DATA.city ? "·" + DATA.city + "版" : "";
-    $("btnCity").textContent = cityShort(DATA.city);
     applyFilters();
     storageSet("city", { file: entry.f || "", name: DATA.city });
   }
 
   function pickCity(entry, done) {
     var finish = done || function () {};
-    $("cpanel").hidden = true;
+    $("lpanel").hidden = true;
     if ((entry.f || "") === state.cityFile) { finish(); return; }
-    var btn = $("btnCity");
-    var prevLabel = btn.textContent;
     if (!entry.f) { applyCity(window.__JTC_DATA__, entry); finish(); return; }
     if (loadedFiles[entry.f]) { applyCity(loadedFiles[entry.f], entry); finish(); return; }
-    btn.textContent = "加载中…";
+    showNotice("正在加载" + cityShort(entry.c) + "数据…");
     var script = document.createElement("script");
     script.src = "./assets/" + entry.f;
     script.onload = function () {
@@ -615,13 +820,11 @@
       if (data && data.city === entry.c && data.parks && data.parks.length) {
         applyCity(data, entry);
       } else {
-        btn.textContent = prevLabel;
         showNotice("城市数据异常，请重试");
       }
       finish();
     };
     script.onerror = function () {
-      btn.textContent = prevLabel;
       showNotice("城市数据加载失败，请点击城市重试");
       finish();
     };
@@ -640,6 +843,8 @@
     }
     return best ? { entry: best, distM: bestDist } : null;
   }
+
+  /* ------------------------------ 位置弹层（LocationSheet 同款：当前位置 + 城市 + 区域） ------------------------------ */
 
   function renderCityPanel(kw) {
     var shown = [];
@@ -667,94 +872,57 @@
     }
     html += "</div>";
     $("cityBody").innerHTML = html;
+    renderDistrictPanel();
   }
 
-  function openCityPanel() {
+  /* 区域：当前城市的行政区 chips，点选即时生效（对齐 LocationSheet 的区域块） */
+  function renderDistrictPanel() {
+    var districts = {};
+    for (var i = 0; i < DATA.parks.length; i++) {
+      var dv = DATA.parks[i].d;
+      if (dv) districts[dv] = (districts[dv] || 0) + 1;
+    }
+    var dts = Object.keys(districts).sort(function (a, b) { return districts[b] - districts[a]; });
+    var sec = $("distSec");
+    if (dts.length <= 1) { sec.hidden = true; return; }
+    sec.hidden = false;
+    var html = "";
+    html += '<button class="fbtn' + (state.district ? "" : " on") + '" data-dv="">全部</button>';
+    for (var k = 0; k < dts.length; k++) {
+      html += '<button class="fbtn' + (state.district === dts[k] ? " on" : "") + '" data-dv="' + esc(dts[k]) + '">'
+        + esc(dts[k]) + " " + districts[dts[k]] + "</button>";
+    }
+    $("distBody").innerHTML = html;
+  }
+
+  function openLocPanel() {
     $("cityKw").value = "";
     renderCityPanel("");
-    $("cpanel").hidden = false;
+    $("lpanel").hidden = false;
+  }
+
+  function resetAll() {
+    state.kw = "";
+    $("kw").value = "";
+    state.district = "";
+    state.industry = "";
+    state.type = "";
+    state.slot = "";
+    state.maxPrice = 0;
+    updateFilterBadge();
+    setSort("recommend");
   }
 
   /* ------------------------------ 初始化 ------------------------------ */
 
   function init() {
-    $("cityTag").textContent = DATA.city ? "·" + DATA.city + "版" : "";
     $("upd").textContent = DATA.updatedAt || "";
+    applyHostTop();
 
     // 试水包只带一个城市（构建时 --max-parks），城市切换没有意义，直接藏掉入口
-    if (INDEX.cities.length <= 1) $("btnCity").hidden = true;
+    if (INDEX.cities.length <= 1) $("btnLoc").hidden = true;
 
-    $("btnLoc").addEventListener("click", locate);
-    bindListEvents();
-
-    $("btnFilter").addEventListener("click", openFilterPanel);
-    $("fClose").addEventListener("click", function () { $("fpanel").hidden = true; });
-    $("fReset").addEventListener("click", function () {
-      draft = { district: "", industry: "", type: "", slot: "" };
-      renderFilterPanel();
-    });
-    $("fApply").addEventListener("click", commitFilter);
-    $("fpanel").addEventListener("click", function (e) {
-      if (e.target === $("fpanel")) $("fpanel").hidden = true;
-    });
-
-    $("btnCity").addEventListener("click", openCityPanel);
-    $("cClose").addEventListener("click", function () { $("cpanel").hidden = true; });
-    $("cpanel").addEventListener("click", function (e) {
-      if (e.target === $("cpanel")) $("cpanel").hidden = true;
-    });
-    $("cityBody").addEventListener("click", function (e) {
-      var b = e.target.closest ? e.target.closest("[data-ci]") : null;
-      if (b) pickCity(INDEX.cities[Number(b.getAttribute("data-ci"))]);
-    });
-    var cityTimer = null;
-    $("cityKw").addEventListener("input", function (e) {
-      clearTimeout(cityTimer);
-      cityTimer = setTimeout(function () {
-        renderCityPanel((e.target.value || "").trim());
-      }, 200);
-    });
-
-    // 恢复上次选择的城市
-    storageGet("city", function (saved) {
-      if (!saved || !saved.file) return;
-      for (var i = 0; i < INDEX.cities.length; i++) {
-        if (INDEX.cities[i].f === saved.file) { pickCity(INDEX.cities[i]); return; }
-      }
-    });
-    updateFilterBadge();
-
-    $("sortDist").addEventListener("click", function () {
-      state.sort = "dist";
-      $("sortDist").classList.add("on");
-      $("sortPrice").classList.remove("on");
-      if (state.lat == null) {
-        locate();
-      } else {
-        applyFilters();
-      }
-    });
-    $("sortPrice").addEventListener("click", function () {
-      state.sort = "price";
-      $("sortPrice").classList.add("on");
-      $("sortDist").classList.remove("on");
-      applyFilters();
-    });
-    $("more").addEventListener("click", function () {
-      state.page += 1;
-      renderList();
-    });
-
-    $("shClose").addEventListener("click", closeSheet);
-    $("shSave").addEventListener("click", saveQr);
-    $("notice").addEventListener("click", function () {
-      clearTimeout(noticeTimer);
-      $("notice").hidden = true;
-    });
-    $("sheet").addEventListener("click", function (e) {
-      if (e.target === $("sheet")) closeSheet();
-    });
-
+    /* 品牌头搜索 */
     var kwTimer = null;
     $("kw").addEventListener("input", function (e) {
       clearTimeout(kwTimer);
@@ -764,6 +932,128 @@
       }, 250);
     });
 
+    /* 吸顶工具条 */
+    $("btnLoc").addEventListener("click", openLocPanel);
+    $("btnFilter").addEventListener("click", openFilterPanel);
+    $("btnReset").addEventListener("click", resetAll);
+    $("sortRec").addEventListener("click", function () { setSort("recommend"); });
+    $("sortDist").addEventListener("click", function () {
+      if (state.lat == null) {
+        locate("dist");
+      } else {
+        setSort("dist");
+      }
+    });
+    $("sortPrice").addEventListener("click", function () { setSort("price"); });
+
+    /* 列表：点套餐 chip 出码；空结果按钮 */
+    $("list").addEventListener("click", function (e) {
+      var chip = e.target.closest ? e.target.closest(".pkg-chip") : null;
+      if (chip) {
+        var item = findItem(chip.getAttribute("data-park"));
+        var pkg = item && findPkg(item, chip.getAttribute("data-pkg"));
+        if (item && pkg) openSheet(item, pkg);
+        return;
+      }
+      var btn = e.target.closest ? e.target.closest("button") : null;
+      if (!btn) return;
+      if (btn.id === "btnNearMe") {
+        state.kw = "";
+        $("kw").value = "";
+        locate("dist");
+      } else if (btn.id === "btnWholeCity") {
+        state.kw = "";
+        state.district = "";
+        $("kw").value = "";
+        applyFilters();
+      } else if (btn.id === "btnClearAll") {
+        resetAll();
+      }
+    });
+    /* 滚到底自动加载：哨兵进入视口（含 240px 预载区）就翻下一页；
+       纯本地切片无网络失败，不需要重试路径 */
+    var io = new IntersectionObserver(function (entries) {
+      if (!entries[0].isIntersecting) return;
+      if (state.geo !== "idle" || locatingHard) return;
+      if (filtered.length > state.page * PAGE_SIZE) {
+        state.page += 1;
+        renderList();
+      }
+    }, { rootMargin: "240px 0px" });
+    io.observe($("sentinel"));
+
+    /* 位置弹层 */
+    $("useGeo").addEventListener("click", function () {
+      $("lpanel").hidden = true;
+      locate("dist");
+    });
+    $("lClose").addEventListener("click", function () { $("lpanel").hidden = true; });
+    $("lpanel").addEventListener("click", function (e) {
+      if (e.target === $("lpanel")) $("lpanel").hidden = true;
+    });
+    $("cityBody").addEventListener("click", function (e) {
+      var b = e.target.closest ? e.target.closest("[data-ci]") : null;
+      if (b) pickCity(INDEX.cities[Number(b.getAttribute("data-ci"))]);
+    });
+    $("distBody").addEventListener("click", function (e) {
+      var b = e.target.closest ? e.target.closest("[data-dv]") : null;
+      if (!b) return;
+      state.district = b.getAttribute("data-dv") || "";
+      applyFilters();
+      $("lpanel").hidden = true;
+    });
+    var cityTimer = null;
+    $("cityKw").addEventListener("input", function (e) {
+      clearTimeout(cityTimer);
+      cityTimer = setTimeout(function () {
+        renderCityPanel((e.target.value || "").trim());
+      }, 200);
+    });
+
+    /* 筛选弹层 */
+    bindFilterPanel();
+    $("fClose").addEventListener("click", function () { $("fpanel").hidden = true; });
+    $("fReset").addEventListener("click", function () {
+      draft = { industry: "", type: "", slot: "", maxPrice: 0 };
+      renderFilterPanel();
+    });
+    $("fApply").addEventListener("click", commitFilter);
+    $("fpanel").addEventListener("click", function (e) {
+      if (e.target === $("fpanel")) $("fpanel").hidden = true;
+    });
+
+    /* 出码弹层 */
+    $("shClose").addEventListener("click", closeSheet);
+    $("shSave").addEventListener("click", saveQr);
+    $("sheet").addEventListener("click", function (e) {
+      if (e.target === $("sheet")) closeSheet();
+    });
+
+    $("notice").addEventListener("click", function () {
+      clearTimeout(noticeTimer);
+      $("notice").hidden = true;
+    });
+
+    /* 恢复上次选择的城市 → 检查是否弹定位引导 */
+    storageGet("city", function (saved) {
+      if (saved && saved.file) {
+        for (var i = 0; i < INDEX.cities.length; i++) {
+          if (INDEX.cities[i].f === saved.file) { pickCity(INDEX.cities[i], checkGeoAsk); return; }
+        }
+      }
+      checkGeoAsk();
+    });
+
+    /* 引导卡上任意点击（按钮/遮罩）都算手势：关卡 + 立刻定位——进页面的每个人都走到定位 */
+    $("geoPanel").addEventListener("click", function () {
+      $("geoPanel").hidden = true;
+      locate("recommend");
+    });
+    $("geoRetry").addEventListener("click", function () {
+      locate("recommend");
+    });
+
+    updateFilterBadge();
     applyFilters();
   }
 

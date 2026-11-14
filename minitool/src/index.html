@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport"
         content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
-  <title>泊月 · 月卡套餐直办</title>
+  <title>泊月 · 附近停车月卡</title>
   <style>
     /* 官方模板全局重置（zip-artifact-spec §5，Chrome 61 基线） */
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -24,68 +24,110 @@
   <link rel="stylesheet" href="./style.css" />
 </head>
 <body>
-  <header class="hd">
-    <div class="hd-brand">泊月<span id="cityTag"></span></div>
-    <button id="btnLoc" class="btn-loc" type="button">离我最近</button>
-  </header>
+  <!-- 品牌头：对齐站点 HomeSearch 的渐变蓝卡 -->
+  <section class="hero">
+    <div class="hero-brand">
+      <svg class="hero-pin" viewBox="0 0 128 128" aria-hidden="true" focusable="false">
+        <path fill="#ffffff" d="M64 14 c-19 0 -34 15 -34 33 c0 24 34 61 34 61 s34 -37 34 -61 c0 -18 -15 -33 -34 -33 Z"/>
+        <path d="M54 75 V35 H66 a13 13 0 0 1 0 26 H54" fill="none" stroke="#0d3fb0"
+              stroke-width="12" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+      <span class="hero-name">泊月</span>
+      <span class="hero-tag">停车月卡 · 附近谁家最省</span>
+    </div>
+    <h1 class="hero-title">附近哪家能办停车月卡</h1>
+    <div class="hero-sub">谁家最省、多少钱一目了然，扫码直接在官方小程序办</div>
+    <div class="hero-search">
+      <input id="kw" type="search" placeholder="搜车场名 / 地址，如：中心书城" autocomplete="off" />
+    </div>
+  </section>
 
-  <div class="toolbar">
-    <div class="search-wrap">
-      <input id="kw" class="search" type="search" placeholder="搜车场名 / 地址，如：中心书城" autocomplete="off" />
-    </div>
-    <div class="sortbar">
-      <button id="btnCity" class="filter-btn" type="button">深圳</button>
-      <button id="btnFilter" class="filter-btn" type="button">筛选<span id="filterBadge" class="filter-badge" hidden></span></button>
-      <button id="sortDist" class="sort" type="button">距离优先</button>
-      <button id="sortPrice" class="sort on" type="button">价格优先</button>
-    </div>
-  </div>
+  <!-- 吸顶筛选条：位置 / 筛选 / 排序挤一行，条件进面板里选（对齐站点 filter-pill 条） -->
+  <section class="toolbar" id="toolbar">
+    <button id="btnLoc" class="filter-pill shrink" type="button">位置</button>
+    <button id="btnFilter" class="filter-pill" type="button">筛选<span id="filterBadge" class="badge" hidden></span></button>
+    <button id="sortRec" class="filter-pill on" type="button">推荐</button>
+    <button id="sortDist" class="filter-pill dim" type="button">离我最近</button>
+    <button id="sortPrice" class="filter-pill" type="button">每月最省</button>
+    <button id="btnReset" class="filter-pill shrink" type="button" hidden>清空</button>
+  </section>
 
   <div id="notice" class="notice" hidden></div>
+  <div id="geoRetry" class="geo-retry" hidden>定位没有成功，点这里重新定位</div>
 
   <main id="list" class="list"></main>
-  <button id="more" class="more" type="button" hidden>加载更多</button>
+  <div id="sentinel"></div>
+  <div id="noMore" class="no-more" hidden>没有更多了</div>
 
   <footer class="ft">
     数据更新 <span id="upd"></span> · 价格与规则以官方页为准
   </footer>
 
-  <div id="cpanel" class="mask" hidden>
-    <div class="sheet">
-      <div class="sheet-hd">
-        <div class="sh-park">选择城市</div>
-        <button id="cClose" class="sh-close" type="button">关闭</button>
-      </div>
-      <div class="city-search"><input id="cityKw" class="search" type="search" placeholder="搜城市名，如：广州" autocomplete="off" /></div>
-      <div id="cityBody"></div>
+  <!-- 定位引导浮层：官方要求定位由用户手势触发，进页面时引导点一下再定位 -->
+  <div id="geoPanel" class="mask geo-mask" hidden>
+    <div class="geo-card">
+      <div class="geo-title">开启定位</div>
+      <div id="geoDesc" class="geo-desc">按你的位置推荐附近能办月卡的车场，远近一目了然</div>
+      <button id="geoOk" class="btn-primary block-btn" type="button">开启定位</button>
     </div>
   </div>
 
+  <!-- 位置弹层（对齐 LocationSheet：当前位置 + 城市 + 区域） -->
+  <div id="lpanel" class="mask" hidden>
+    <div class="sheet">
+      <div class="sheet-hd">
+        <div class="sheet-title">选择位置</div>
+        <button id="lClose" class="sh-close" type="button">关闭</button>
+      </div>
+      <div class="sheet-body">
+        <button id="useGeo" class="geo-btn" type="button">使用当前位置，看最近的车场</button>
+        <div class="fsec">
+          <div class="fsec-title">城市</div>
+          <div class="city-search"><input id="cityKw" type="search" placeholder="搜城市名，如：广州" autocomplete="off" /></div>
+          <div id="cityBody"></div>
+        </div>
+        <div class="fsec" id="distSec" hidden>
+          <div class="fsec-title">区域<span class="fsec-note">（先选城市，再选区域）</span></div>
+          <div id="distBody" class="fgrid"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 筛选弹层（对齐 FilterSheet：业态 / 类型 / 时段 / 价格上限，确定才生效） -->
   <div id="fpanel" class="mask" hidden>
     <div class="sheet">
       <div class="sheet-hd">
-        <div class="sh-park">筛选</div>
+        <div class="sheet-title">筛选</div>
         <button id="fClose" class="sh-close" type="button">关闭</button>
       </div>
-      <div id="fbody"></div>
+      <div class="sheet-body"><div id="fbody"></div></div>
       <div class="fbtns">
-        <button id="fReset" class="f-reset" type="button">重置</button>
-        <button id="fApply" class="f-apply" type="button">确定</button>
+        <button id="fReset" class="btn-ghost flex1" type="button">重置</button>
+        <button id="fApply" class="btn-primary flex1" type="button">确定</button>
       </div>
     </div>
   </div>
 
+  <!-- 出码弹层（对齐 PackageSheet：先价格后码，保存到相册是小工具特有入口） -->
   <div id="sheet" class="mask" hidden>
     <div class="sheet">
       <div class="sheet-hd">
-        <div id="shPark" class="sh-park"></div>
+        <div class="min-w0">
+          <div id="shPark" class="sh-park"></div>
+          <div id="shAddrTop" class="sh-addr-top" hidden></div>
+          <div id="shDist" class="sh-dist" hidden></div>
+        </div>
         <button id="shClose" class="sh-close" type="button">关闭</button>
       </div>
-      <div id="shPkg" class="sh-pkg"></div>
-      <div class="qr-box"><img id="shQr" alt="推广二维码" /></div>
-      <button id="shSave" class="btn-save" type="button">保存二维码到相册</button>
+      <div id="shPkg" class="sh-price-row"></div>
+      <div id="shRule" class="sh-rule-top" hidden></div>
+      <div id="shQrWrap" class="qr-card"><img id="shQr" alt="套餐二维码" /></div>
+      <div id="shQrFail" class="qr-fail" hidden></div>
+      <button id="shSave" class="btn-primary block-btn" type="button">保存二维码到相册</button>
       <div id="shTip" class="sh-tip"></div>
       <div class="sh-guide">保存二维码后，打开微信「扫一扫」→ 右上角「相册」选这张码即可办理</div>
+      <div class="sh-foot">价格与规则以官方页面为准，下单前请确认出场时间限制</div>
     </div>
   </div>
 
