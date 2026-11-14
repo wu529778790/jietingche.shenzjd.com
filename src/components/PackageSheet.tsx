@@ -64,18 +64,33 @@ export default function PackageSheet({ park, pkg, onClose, shareCode = "" }: Pro
         onClick={(e) => e.stopPropagation()}
       >
         <div className="mb-3 flex items-start justify-between gap-2">
-          <div className="min-w-0">
+          <div className="min-w-0 flex-1">
             <div className="truncate text-base font-semibold">{park.name}</div>
-            <div className="mt-0.5 text-xs text-muted">{pkgLabel}</div>
+            {/* 地址紧跟车场名：用户看到名字时就得知道是哪个位置，压在底部会没人看 */}
+            {park.address ? (
+              <div className="mt-1 text-xs leading-relaxed text-muted">{park.address}</div>
+            ) : null}
             {park.distance ? (
               <div className="mt-0.5 text-[11px] text-brand">
                 距你 {formatDistance(park.distance)}
               </div>
             ) : null}
           </div>
-          <button className="btn-ghost shrink-0 px-2 py-1 text-xs" onClick={onClose}>
-            关闭
-          </button>
+          <div className="flex shrink-0 flex-col gap-1">
+            {navUrl(park) ? (
+              <a
+                className="btn-ghost px-2 py-1 text-center text-xs"
+                href={navUrl(park)}
+                target="_blank"
+                rel="noreferrer"
+              >
+                导航
+              </a>
+            ) : null}
+            <button className="btn-ghost px-2 py-1 text-center text-xs" onClick={onClose}>
+              关闭
+            </button>
+          </div>
         </div>
 
         {/* 先给价格和规格，再给码：用户先判断值不值，再决定扫不扫 */}
@@ -97,6 +112,12 @@ export default function PackageSheet({ park, pkg, onClose, shareCode = "" }: Pro
             </span>
           ))}
         </div>
+        {/* 可停时段是购买决策参数不是页脚细则：紧跟标签/价格，让「夜间是几点」一眼可答 */}
+        {pkg.ruleSummary ? (
+          <div className="-mt-1 mb-3 text-xs leading-relaxed text-muted">
+            {tidyRuleSummary(pkg.ruleSummary)}
+          </div>
+        ) : null}
 
         {/*
           只能出码：实测这个链接在微信里点不开（微信只会跳小程序），
@@ -121,28 +142,6 @@ export default function PackageSheet({ park, pkg, onClose, shareCode = "" }: Pro
             链接生成失败，刷新页面再试，或直接在小程序里搜「{park.name}」
           </div>
         )}
-
-        {pkg.ruleSummary ? (
-          <div className="mb-3 rounded-lg bg-black/[0.03] p-2 text-xs leading-relaxed text-muted">
-            {tidyRuleSummary(pkg.ruleSummary)}
-          </div>
-        ) : null}
-
-        {park.address ? (
-          <div className="mb-3 flex items-start gap-2 text-xs text-muted">
-            <span className="min-w-0 flex-1">{park.address}</span>
-            {navUrl(park) ? (
-              <a
-                className="btn-ghost shrink-0 px-2 py-1 text-xs"
-                href={navUrl(park)}
-                target="_blank"
-                rel="noreferrer"
-              >
-                导航
-              </a>
-            ) : null}
-          </div>
-        ) : null}
 
         <div className="text-center text-[11px] text-muted">
           价格与规则以官方页面为准，下单前请确认出场时间限制

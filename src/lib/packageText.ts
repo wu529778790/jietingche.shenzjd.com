@@ -95,6 +95,11 @@ export function cleanRuleSummary(summary: string): string {
       return [words[0], ...words.slice(i)].join(" ");
     })
     .filter(Boolean)
+    .map((part) =>
+      part
+        .replace(/^每天 00:00-23:59$/, "全天可停")
+        .replace(/^(工作日|周末|节假日) 00:00-23:59$/, "$1全天"),
+    )
     .join(" / ");
 }
 
