@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<title>泊月 · 小红书小工具提交封面</title>
+<!--
+  出图源文件 / 预览页。
+
+    node scripts/brand/render-cover.mjs   → reference/brand/covers/*.png
+
+  平台没公开小工具封面规格，先按三种常见比例各出一张，上传页实测哪张合适：
+    cover-1x1.png    800×800   （2x 出图 1600×1600）
+    cover-3x4.png    900×1200  （2x 出图 1800×2400）
+    cover-16x9.png   1200×675  （2x 出图 2400×1350）
+
+  文案纪律（与站点话术一致）：品类词「停车月卡」+ 位置「附近」+ 利益「谁家最省」。
+  不写「便宜」「优惠」「比价」——前两个会吸来临停用户，后一个是临停折扣券的意思。
+  封面上不放二维码：码只出现在小工具内部（见 reference/xhs-minitool-research.md 第五节）。
+
+  换机器上没有 Chromium 时，浏览器打开本文件，DevTools 对目标块右键
+  「Capture node screenshot」也能出图。
+-->
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #eef2f7; font-family: -apple-system, "PingFang SC", sans-serif; }
+
+  .cover {
+    position: relative; overflow: hidden;
+    background: linear-gradient(135deg, #1b6bff 0%, #0d3fb0 100%);
+    color: #fff;
+    display: flex; flex-direction: column; justify-content: center;
+    margin: 24px;
+  }
+  .cover .ring {
+    position: absolute; border: 2px solid rgba(255, 255, 255, .13); border-radius: 50%;
+  }
+  .cover .brand { display: flex; align-items: center; }
+  .cover .brand svg { flex: none; }
+  .cover .brand .nm { font-weight: 800; letter-spacing: 2px; line-height: 1; }
+  .cover h1 { font-weight: 800; }
+  .cover p { color: rgba(255, 255, 255, .8); }
+  .cover .pill {
+    display: inline-block; align-self: flex-start;
+    background: rgba(255, 255, 255, .16); border-radius: 999px;
+    color: #fff; letter-spacing: .5px;
+  }
+
+  /* ---------- 1:1（主推） ---------- */
+  #cover-1x1 { width: 800px; height: 800px; padding: 0 68px; }
+  #cover-1x1 .ring-a { width: 460px; height: 460px; right: -150px; top: -130px; }
+  #cover-1x1 .ring-b { width: 320px; height: 320px; right: 30px; bottom: -180px; }
+  #cover-1x1 .brand { gap: 14px; margin-bottom: 56px; }
+  #cover-1x1 .brand svg { width: 58px; height: 58px; }
+  #cover-1x1 .brand .nm { font-size: 30px; }
+  #cover-1x1 h1 { font-size: 86px; line-height: 1.22; letter-spacing: 2px; }
+  #cover-1x1 p { margin-top: 30px; font-size: 27px; letter-spacing: .5px; }
+  #cover-1x1 .pill { margin-top: 44px; padding: 14px 28px; font-size: 22px; }
+
+  /* ---------- 3:4 ---------- */
+  #cover-3x4 { width: 900px; height: 1200px; padding: 0 76px; }
+  #cover-3x4 .ring-a { width: 520px; height: 520px; right: -170px; top: -150px; }
+  #cover-3x4 .ring-b { width: 360px; height: 360px; right: 40px; bottom: -200px; }
+  #cover-3x4 .brand { gap: 16px; margin-bottom: 72px; }
+  #cover-3x4 .brand svg { width: 66px; height: 66px; }
+  #cover-3x4 .brand .nm { font-size: 34px; }
+  #cover-3x4 h1 { font-size: 96px; line-height: 1.24; letter-spacing: 2px; }
+  #cover-3x4 p { margin-top: 36px; font-size: 30px; letter-spacing: .5px; }
+  #cover-3x4 .pill { margin-top: 52px; padding: 16px 32px; font-size: 24px; }
+
+  /* ---------- 16:9 ---------- */
+  #cover-16x9 { width: 1200px; height: 675px; padding: 0 84px; }
+  #cover-16x9 .ring-a { width: 520px; height: 520px; right: -140px; top: -140px; }
+  #cover-16x9 .ring-b { width: 380px; height: 380px; right: 30px; bottom: -200px; }
+  #cover-16x9 .brand { gap: 16px; margin-bottom: 46px; }
+  #cover-16x9 .brand svg { width: 64px; height: 64px; }
+  #cover-16x9 .brand .nm { font-size: 32px; }
+  #cover-16x9 h1 { font-size: 72px; line-height: 1.24; letter-spacing: 1px; }
+  #cover-16x9 p { margin-top: 24px; font-size: 26px; letter-spacing: .5px; }
+  #cover-16x9 .pill { margin-top: 36px; padding: 12px 26px; font-size: 20px; }
+</style>
+</head>
+<body>
+
+<!-- #cover-1x1:start -->
+<div id="cover-1x1" class="cover">
+  <div class="ring ring-a"></div>
+  <div class="ring ring-b"></div>
+  <div class="brand">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+      <path fill="#ffffff" d="M64 14 c-19 0 -34 15 -34 33 c0 24 34 61 34 61 s34 -37 34 -61 c0 -18 -15 -33 -34 -33 Z"/>
+      <path d="M54 75 V35 H66 a13 13 0 0 1 0 26 H54" fill="none" stroke="#0d3fb0"
+        stroke-width="12" stroke-linecap="round" stroke-linejoin="round"/>
+    </svg>
+    <div class="nm">泊月</div>
+  </div>
+  <h1>停车月卡<br/>附近谁家最省</h1>
+  <p>130 城 · 7800+ 车场</p>
+  <div class="pill">官方小程序下单</div>
+</div>
+<!-- #cover-1x1:end -->
+
+<!-- #cover-3x4:start -->
+<div id="cover-3x4" class="cover">
+  <div class="ring ring-a"></div>
+  <div class="ring ring-b"></div>
+  <div class="brand">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+      <path fill="#ffffff" d="M64 14 c-19 0 -34 15 -34 33 c0 24 34 61 34 61 s34 -37 34 -61 c0 -18 -15 -33 -34 -33 Z"/>
+      <path d="M54 75 V35 H66 a13 13 0 0 1 0 26 H54" fill="none" stroke="#0d3fb0"
+        stroke-width="12" stroke-linecap="round" stroke-linejoin="round"/>
+    </svg>
+    <div class="nm">泊月</div>
+  </div>
+  <h1>停车月卡<br/>附近谁家最省</h1>
+  <p>130 城 · 7800+ 车场<br/>月卡 / 季卡 / 夜间包月</p>
+  <div class="pill">官方小程序下单</div>
+</div>
+<!-- #cover-3x4:end -->
+
+<!-- #cover-16x9:start -->
+<div id="cover-16x9" class="cover">
+  <div class="ring ring-a"></div>
+  <div class="ring ring-b"></div>
+  <div class="brand">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+      <path fill="#ffffff" d="M64 14 c-19 0 -34 15 -34 33 c0 24 34 61 34 61 s34 -37 34 -61 c0 -18 -15 -33 -34 -33 Z"/>
+      <path d="M54 75 V35 H66 a13 13 0 0 1 0 26 H54" fill="none" stroke="#0d3fb0"
+        stroke-width="12" stroke-linecap="round" stroke-linejoin="round"/>
+    </svg>
+    <div class="nm">泊月</div>
+  </div>
+  <h1>停车月卡，附近谁家最省</h1>
+  <p>130 城 · 7800+ 车场 · 月卡 / 季卡 / 夜间包月</p>
+  <div class="pill">官方小程序下单</div>
+</div>
+<!-- #cover-16x9:end -->
+
+</body>
+</html>
