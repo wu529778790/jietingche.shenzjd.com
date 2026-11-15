@@ -69,6 +69,7 @@ export async function GET() {
 
     const entries: Entry[] = [
       { loc: absoluteUrl("/"), changefreq: "daily", priority: "1.0" },
+      { loc: absoluteUrl("/guide"), changefreq: "weekly", priority: "0.8" },
       ...cities.map((city) => ({
         loc: absoluteUrl(cityPath(city.city)),
         changefreq: "weekly" as const,
