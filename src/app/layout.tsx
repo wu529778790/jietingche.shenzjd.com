@@ -25,6 +25,8 @@ export const metadata: Metadata = {
     "夜间停车套餐",
   ],
   applicationName: SITE_NAME,
+  /* 搜狗站长平台站点验证（搜狗收录池与微信搜一搜打通，见 /guide 承接页） */
+  other: { "sogou_site_verification": "8Zn6caf6id" },
   alternates: { canonical: "/" },
   openGraph: {
     type: "website",
