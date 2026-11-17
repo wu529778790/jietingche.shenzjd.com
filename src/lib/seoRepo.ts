@@ -40,7 +40,7 @@ const ACTIVE_PACKAGE = `k.status = 'active' AND ${NOT_PLACEHOLDER}`;
  * 后者正在逐步清掉（scripts/import-jtc.mjs 入库时归一），保留这段是为了
  * 代码先上线、数据后刷新时不会有一批区县页突然 404。
  */
-const DISTRICT_MATCH = `(c.district = ? OR c.district = ? || c.city)`;
+const DISTRICT_MATCH = `(c.district = ? OR c.district = c.city || ?)`;
 
 /**
  * 城市页/兄弟区县列表的去重合并。

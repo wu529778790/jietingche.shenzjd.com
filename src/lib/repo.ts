@@ -3,6 +3,7 @@ import type { OutreachLogRow, StatSnapshot } from "./adminTypes";
 import { db, ensureSchema, newId, now, num, str } from "./db";
 import { toCarPark, toLog, toPackage, toSnapshot } from "./rows";
 import { CONFIG_KEYS } from "./schema";
+import { normalizeDistrict } from "./district";
 import { buildQueryPlan, type PlaceDict, type QueryVariant } from "./searchQuery";
 import { buildTermIndex, suggestTerms, type TermHit } from "./searchTerms";
 import {
@@ -505,8 +506,9 @@ async function runSearch(input: SearchInput, variant: QueryVariant | null): Prom
     parkArgs.push(input.city);
   }
   if (input.district) {
-    parkConds.push("c.district = ?");
-    parkArgs.push(input.district);
+    // 旧数据里同一区县有「上海市嘉定区」/「嘉定区」两套写法，筛选只认一种就会漏一半车场
+    parkConds.push("(c.district = ? OR c.district = c.city || ?)");
+    parkArgs.push(input.district, input.district);
   }
   if (input.industry) {
     parkConds.push("c.industry = ?");
@@ -772,9 +774,24 @@ export async function facets(city?: string): Promise<Facets> {
   ]);
   const toFacets = (rows: Row[]): FacetItem[] =>
     rows.map((row) => ({ name: str(row.name), count: num(row.n) })).filter((item) => item.name);
+
+  // 区县分面按归一名合并：旧数据里同一区县有「上海市嘉定区」和「嘉定区」两条，
+  // 原样给出来就是两个选项，点哪个都只能搜到一半车场
+  const districtFacets = (() => {
+    const merged = new Map<string, number>();
+    for (const row of districts.rows) {
+      const name = normalizeDistrict(city ?? "", str(row.name));
+      if (!name) continue;
+      merged.set(name, (merged.get(name) ?? 0) + num(row.n));
+    }
+    return [...merged]
+      .map(([name, count]) => ({ name, count }))
+      .sort((a, b) => b.count - a.count);
+  })();
+
   return {
     cities: toFacets(cities.rows),
-    districts: toFacets(districts.rows),
+    districts: districtFacets,
     industries: toFacets(industries.rows),
     types: toFacets(types.rows),
     slots: toFacets(slots.rows),
