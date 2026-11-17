@@ -11,6 +11,7 @@
  * 宁可放行让页面自己处理，也不能因为一次查询抖动把正常页面全判 404。
  */
 import { db, str } from "./db";
+import { normalizeDistrict } from "./district";
 
 const TTL = 5 * 60 * 1000;
 
@@ -51,7 +52,9 @@ async function build(): Promise<Snapshot> {
   const areaKeys = new Set<string>();
   for (const row of areas.rows) {
     const city = str(row.city);
-    const district = str(row.district);
+    // 只收归一后的写法：/city/上海市/上海市嘉定区 这种重复页不该再进白名单，
+    // 它会在 proxy 里被 301 到 /city/上海市/嘉定区（见 src/proxy.ts）
+    const district = normalizeDistrict(city, str(row.district));
     if (!city) continue;
     cities.add(city);
     if (district) areaKeys.add(`${city}|${district}`);

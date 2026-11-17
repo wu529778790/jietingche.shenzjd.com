@@ -17,6 +17,7 @@ import {
   monthlyPrice,
 } from "./packageText";
 import { distanceMeters, type CarPark, type Package } from "./types";
+import { normalizeDistrict } from "./district";
 
 const LONG_TERM_TYPE_SQL = "'月卡','季卡','半年卡','年卡'";
 const PLACEHOLDER_WORDS = ["定金", "订金", "占位", "测试", "补差"];
@@ -33,6 +34,44 @@ const LONG_TERM_MONTHLY =
 const MIN_MONTHLY = `COALESCE(${LONG_TERM_MONTHLY}, MIN(${MONTHLY_EXPR}))`;
 
 const ACTIVE_PACKAGE = `k.status = 'active' AND ${NOT_PLACEHOLDER}`;
+
+/**
+ * 区县命中的两种写法：规范名，以及库里可能残留的「市名 + 区县名」旧写法。
+ * 后者正在逐步清掉（scripts/import-jtc.mjs 入库时归一），保留这段是为了
+ * 代码先上线、数据后刷新时不会有一批区县页突然 404。
+ */
+const DISTRICT_MATCH = `(c.district = ? OR c.district = ? || c.city)`;
+
+/**
+ * 城市页/兄弟区县列表的去重合并。
+ *
+ * SQL 的 GROUP BY 会把「上海市嘉定区」和「嘉定区」算成两行，直接渲染就是
+ * 同一个区两个链接（其中一个必然是重复内容）。这里按归一后的名字合并：
+ * 车场数相加（一个车场只有一个区县，不会重复计），最低价取更小的那个。
+ */
+function mergeDistricts(
+  rows: Row[],
+  city: string,
+): { name: string; parkCount: number; minMonthly: number }[] {
+  const merged = new Map<string, { parkCount: number; minMonthly: number }>();
+  for (const row of rows) {
+    const name = normalizeDistrict(city, str(row.district));
+    if (!name) continue;
+    const parkCount = num(row.park_count);
+    const minMonthly = num(row.min_monthly);
+    const prev = merged.get(name);
+    merged.set(name, {
+      parkCount: (prev?.parkCount ?? 0) + parkCount,
+      minMonthly:
+        prev && prev.minMonthly && minMonthly
+          ? Math.min(prev.minMonthly, minMonthly)
+          : prev?.minMonthly || minMonthly,
+    });
+  }
+  return [...merged]
+    .map(([name, value]) => ({ name, ...value }))
+    .sort((a, b) => b.parkCount - a.parkCount || a.name.localeCompare(b.name, "zh"));
+}
 
 export interface ParkSummary {
   id: string;
@@ -173,11 +212,7 @@ export async function getCitySeo(city: string): Promise<CitySeo> {
     parkCount: num(total?.park_count),
     packageCount: num(total?.package_count),
     minMonthly: num(total?.min_monthly),
-    districts: districts.rows.map((row) => ({
-      name: str(row.district),
-      parkCount: num(row.park_count),
-      minMonthly: num(row.min_monthly),
-    })),
+    districts: mergeDistricts(districts.rows, city),
   };
 }
 
@@ -191,16 +226,16 @@ export async function getDistrictSeo(
     db.execute({
       sql: `SELECT COUNT(DISTINCT c.id) AS park_count, COUNT(k.id) AS package_count, ${MIN_MONTHLY} AS min_monthly
             FROM car_parks c JOIN packages k ON k.park_id = c.id
-            WHERE c.city = ? AND c.district = ? AND ${ACTIVE_PACKAGE}`,
-      args: [city, district],
+            WHERE c.city = ? AND ${DISTRICT_MATCH} AND ${ACTIVE_PACKAGE}`,
+      args: [city, district, district],
     }),
     db.execute({
       sql: `SELECT c.district AS district, COUNT(DISTINCT c.id) AS park_count, ${MIN_MONTHLY} AS min_monthly
             FROM car_parks c JOIN packages k ON k.park_id = c.id
-            WHERE c.city = ? AND c.district <> '' AND c.district <> ? AND ${ACTIVE_PACKAGE}
+            WHERE c.city = ? AND c.district <> '' AND NOT ${DISTRICT_MATCH} AND ${ACTIVE_PACKAGE}
             GROUP BY c.district
             ORDER BY park_count DESC, district ASC`,
-      args: [city, district],
+      args: [city, district, district],
     }),
   ]);
   const total = totals.rows[0];
@@ -210,11 +245,7 @@ export async function getDistrictSeo(
     parkCount: num(total?.park_count),
     packageCount: num(total?.package_count),
     minMonthly: num(total?.min_monthly),
-    districts: siblings.rows.map((row) => ({
-      name: str(row.district),
-      parkCount: num(row.park_count),
-      minMonthly: num(row.min_monthly),
-    })),
+    districts: mergeDistricts(siblings.rows, city),
   };
 }
 
@@ -229,8 +260,8 @@ export async function listParksByArea(
   const where = [`c.city = ?`, ACTIVE_PACKAGE];
   const args: (string | number)[] = [city];
   if (district) {
-    where.push("c.district = ?");
-    args.push(district);
+    where.push(DISTRICT_MATCH);
+    args.push(district, district);
   }
   const res = await db.execute({
     sql: `SELECT c.id, c.park_code, c.name, c.city, c.district, c.area, c.address, c.industry, c.audience,
@@ -262,9 +293,9 @@ export async function getDistrictMonthlyBenchmark(
   const res = await db.execute({
     sql: `SELECT ${MIN_MONTHLY} AS m
           FROM car_parks c JOIN packages k ON k.park_id = c.id
-          WHERE c.city = ? AND c.district = ? AND ${ACTIVE_PACKAGE}
+          WHERE c.city = ? AND ${DISTRICT_MATCH} AND ${ACTIVE_PACKAGE}
           GROUP BY c.id`,
-    args: [city, district],
+    args: [city, district, district],
   });
   const values = res.rows
     .map((row) => num(row.m))
@@ -431,7 +462,19 @@ export async function listAreaRoutes(): Promise<{ city: string; district: string
           GROUP BY city, district
           ORDER BY city ASC, district ASC`,
   });
-  return res.rows.map((row) => ({ city: str(row.city), district: str(row.district) }));
+  // 归一后去重：「上海市嘉定区」和「嘉定区」只留一条，否则 sitemap 里同一区两个 URL
+  const seen = new Set<string>();
+  const routes: { city: string; district: string }[] = [];
+  for (const row of res.rows) {
+    const city = str(row.city);
+    const district = normalizeDistrict(city, str(row.district));
+    if (!city || !district) continue;
+    const key = `${city}|${district}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    routes.push({ city, district });
+  }
+  return routes;
 }
 
 /** 可索引的车场路由（只收有在售套餐的车场，避免空页面进 sitemap） */

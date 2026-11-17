@@ -23,6 +23,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { COLUMN_MIGRATIONS, INDEX_SQL, TABLE_SQL } from "../src/lib/schema.ts";
 import { cleanPackageName, cleanRuleSummary } from "../src/lib/packageText.ts";
+import { normalizeDistrict } from "../src/lib/district.ts";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(__dirname, "..");
@@ -147,11 +148,14 @@ for (const row of rows) {
   const name = cleanName(row.park_name) || "未命名车场";
   let park = parks.get(code);
   if (!park) {
+    // 区县入库时就归一：「上海市嘉定区」和「嘉定区」是同一个区，两套写法各自成页
+    // 就是两个 URL 两份内容（实测 57 组），归一后 sitemap/内链/路由只认一个
+    const city = cleanName(row.city) || fallbackCity(cleanName(row.city_code));
     park = {
       code,
       name,
-      city: cleanName(row.city) || fallbackCity(cleanName(row.city_code)),
-      district: cleanName(row.district),
+      city,
+      district: normalizeDistrict(city, cleanName(row.district)),
       province: cleanName(row.province),
       address: (row.address ?? "").trim(),
       lng: Number(row.lng) || 0,

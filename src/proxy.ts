@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { isAdminDevBypass, verifyAdminRequest } from "@/lib/adminAuth";
 import { clientIp } from "@/lib/api";
 import { routeExists } from "@/lib/routeGuard";
+import { normalizeDistrict } from "@/lib/district";
 import { isBotBlocked } from "@/lib/ua";
 import { recordVisit } from "@/lib/visitLog";
 
@@ -18,6 +19,15 @@ const PUBLIC_API = new Set([
   "/api/admin/session",
   "/api/admin/logout",
 ]);
+
+/** 路径段解码，畸形编码原样返回（宁可查无此页，也别在中间件里抛异常） */
+function safeDecode(value: string): string {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
 
 function isPublic(pathname: string, method: string): boolean {
   if (pathname === "/admin/login") return true;
@@ -118,6 +128,34 @@ export async function proxy(req: NextRequest) {
       status: 403,
       headers: { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" },
     });
+  }
+
+  /**
+   * 区县名归一到 301，必须排在白名单之前。
+   *
+   * 官方数据同一区县有两套写法（「上海市嘉定区」/「嘉定区」），两套各自成页
+   * 就是两份内容、两个 canonical，实测 57 组，Google 对其中一部分直接判
+   * 「无法识别此网址」。这里把带重复市名前缀的旧 URL 永久重定向到规范页，
+   * 权重并回一个；归一后为空的（「/city/深圳市/中国」这类把省市区错位的脏值）
+   * 直接 404，不给软 404 的机会。
+   */
+  if (pathname.startsWith("/city/")) {
+    const segs = pathname.split("/").filter(Boolean);
+    if (segs.length === 3 && segs[2] !== "page") {
+      const city = safeDecode(segs[1]);
+      const raw = safeDecode(segs[2]);
+      const district = normalizeDistrict(city, raw);
+      if (!district) {
+        if (trackable) logVisit(req, pathname, 404);
+        return notFoundPage();
+      }
+      if (district !== raw) {
+        const url = req.nextUrl.clone();
+        url.pathname = `/city/${encodeURIComponent(city)}/${encodeURIComponent(district)}`;
+        if (trackable) logVisit(req, pathname, 301);
+        return NextResponse.redirect(url, 301);
+      }
+    }
   }
 
   if (pathname === "/" || pathname.startsWith("/city/") || pathname.startsWith("/park/")) {
