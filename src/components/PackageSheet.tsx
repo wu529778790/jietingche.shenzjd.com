@@ -54,43 +54,76 @@ export default function PackageSheet({ park, pkg, onClose, shareCode = "" }: Pro
     pkg.durationDays && !pkg.durationLabel ? `${pkg.durationDays} 天` : "",
   ].filter(Boolean);
 
+  const nav = navUrl(park);
+
   return (
     <div
       className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 sm:items-center"
       onClick={onClose}
     >
       <div
-        className="max-h-[92vh] w-full max-w-lg overflow-y-auto rounded-t-2xl bg-card p-4 sm:rounded-2xl"
+        className="relative max-h-[92vh] w-full max-w-lg overflow-y-auto rounded-t-2xl bg-card p-4 sm:rounded-2xl"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="mb-3 flex items-start justify-between gap-2">
-          <div className="min-w-0 flex-1">
-            <div className="truncate text-base font-semibold">{park.name}</div>
-            {/* 地址紧跟车场名：用户看到名字时就得知道是哪个位置，压在底部会没人看 */}
-            {park.address ? (
-              <div className="mt-1 text-xs leading-relaxed text-muted">{park.address}</div>
-            ) : null}
-            {park.distance ? (
-              <div className="mt-0.5 text-[11px] text-brand">
-                距你 {formatDistance(park.distance)}
-              </div>
-            ) : null}
-          </div>
-          <div className="flex shrink-0 flex-col gap-1">
-            {navUrl(park) ? (
-              <a
-                className="btn-ghost px-2 py-1 text-center text-xs"
-                href={navUrl(park)}
-                target="_blank"
-                rel="noreferrer"
+        {/* 右上角只有图标动作：导航和关闭都写成文字按钮时两列堆叠，看着像同一个按钮重复 */}
+        <div className="absolute right-3 top-3 flex items-center gap-1">
+          {nav ? (
+            <a
+              className="flex h-9 w-9 items-center justify-center rounded-lg text-muted transition-colors hover:bg-black/5 hover:text-brand active:bg-black/10"
+              href={nav}
+              target="_blank"
+              rel="noreferrer"
+              title="在高德地图中打开"
+              aria-label="在高德地图中打开"
+            >
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.8"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className="h-4 w-4"
+                aria-hidden="true"
               >
-                导航
-              </a>
-            ) : null}
-            <button className="btn-ghost px-2 py-1 text-center text-xs" onClick={onClose}>
-              关闭
-            </button>
-          </div>
+                <path d="M7 17 17 7" />
+                <path d="M9 7h8v8" />
+              </svg>
+            </a>
+          ) : null}
+          <button
+            type="button"
+            className="flex h-9 w-9 items-center justify-center rounded-lg text-muted transition-colors hover:bg-black/5 hover:text-foreground active:bg-black/10"
+            onClick={onClose}
+            title="关闭"
+            aria-label="关闭"
+          >
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.8"
+              strokeLinecap="round"
+              className="h-4 w-4"
+              aria-hidden="true"
+            >
+              <path d="M6 6l12 12" />
+              <path d="M18 6 6 18" />
+            </svg>
+          </button>
+        </div>
+
+        <div className="mb-3 pr-20">
+          <div className="truncate text-base font-semibold">{park.name}</div>
+          {/* 地址紧跟车场名：用户看到名字时就得知道是哪个位置，压在底部会没人看 */}
+          {park.address ? (
+            <div className="mt-1 text-xs leading-relaxed text-muted">{park.address}</div>
+          ) : null}
+          {park.distance ? (
+            <div className="mt-0.5 text-[11px] text-brand">
+              距你 {formatDistance(park.distance)}
+            </div>
+          ) : null}
         </div>
 
         {/* 先给价格和规格，再给码：用户先判断值不值，再决定扫不扫 */}
