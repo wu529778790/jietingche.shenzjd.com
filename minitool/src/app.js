@@ -549,7 +549,12 @@
         }
         if (res.reason === "unsupported" || res.reason === "sdk_missing") {
           downloadDataUrl(qrSrc, fileName);
-          tip.textContent = "当前环境不支持直接存相册（仅 B站 App 内可用），可长按上方凭证图保存";
+          /* 分开说：SDK 靠 UA 里的 BiliApp 判断在不在 App 容器内，
+             不在容器里（含 App 内置浏览器、私信外链）相册接口一律不可用 */
+          tip.className = "sh-tip err";
+          tip.textContent = toyInApp()
+            ? "宿主没有上报相册能力（预览页常见），发版后在作品页里再试；也可长按上方凭证图保存"
+            : "当前页面不在 B站 App 容器内（UA 无 BiliApp），系统相册接口用不了；请长按上方凭证图保存";
           return;
         }
         /* 走到这里是真的失败了：把 SDK 的原始报错摆出来，
@@ -832,6 +837,13 @@
 
   function toySdk() {
     return window.toy || null;
+  }
+
+  /* 官方 SDK 用 UA 里的 BiliApp 判断「在不在 App 容器内」（toy-sdk.js 里就是
+     /BiliApp/i.test(navigator.userAgent)），拿不到这个标记时所有系统能力都不可用。
+     这里复用同一条判据，只用于把失败原因说准。 */
+  function toyInApp() {
+    return /BiliApp/i.test(navigator.userAgent || "");
   }
 
   /* 容器安全区：getContainerState / onContainerChange 给出 CSS px 的 safeArea——
