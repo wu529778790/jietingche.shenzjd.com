@@ -669,6 +669,15 @@
     proceed();
   }
 
+  /* 定位失败文案：三个环境三种出路——
+     小红书 / B站 App 是「去系统设置开权限」，普通浏览器则是「在地址栏允许」。
+     以前一律写小红书，Toy 里报错会指错地方。 */
+  function geoFailCopy(msg) {
+    if (getMini()) return msg + "。可到手机设置里允许小红书使用定位，或直接点「位置」手动选城市";
+    if (toyInApp()) return msg + "。也可以直接点「位置」手动选城市";
+    return msg + "。可在浏览器地址栏允许本站使用定位，或直接点「位置」手动选城市";
+  }
+
   function locateFail(msg) {
     if (locateTimer) { clearTimeout(locateTimer); locateTimer = null; }
     var failNow = function () {
@@ -677,15 +686,24 @@
       applyFilters();
     /* 授权动作后 2 秒内就失败 = 系统层早已拒绝定位（平台不会再弹权限窗）：
        不裸露默认列表，重弹引导卡并写清出路——用户去设置开权限后点卡即成 */
-    if (locateStartedAt && Date.now() - locateStartedAt < 2000 && getMini()) {
+    var fast = locateStartedAt && Date.now() - locateStartedAt < 2000;
+    if (fast && getMini()) {
       $("geoRetry").hidden = true;
       $("geoDesc").textContent = "定位权限未开启：请到手机「设置」里允许小红书使用定位，再回来点「开启定位」";
       $("geoPanel").hidden = false;
       return;
     }
+    /* B站 App 里 WebView 多半不给定位：别把用户支到系统设置页（那儿没有这一项），
+       指向「位置」手动选城市更实在 */
+    if (fast && toyInApp()) {
+      $("geoRetry").hidden = true;
+      $("geoDesc").textContent = "没能拿到你的位置：点这里再试一次，或直接点「位置」手动选城市";
+      $("geoPanel").hidden = false;
+      return;
+    }
     /* 慢速失败（信号/超时等）：黄条说原因，重试条常驻列表顶部给一键重试 */
     $("geoRetry").hidden = false;
-    showNotice(msg + "。可到手机设置里允许小红书使用定位，或直接点「位置」手动选城市", 12000);
+    showNotice(geoFailCopy(msg), 12000);
     };
     var elapsed = Date.now() - locateStartedAt;
     if (elapsed < 600) { setTimeout(failNow, 600 - elapsed); } else { failNow(); }
@@ -700,14 +718,20 @@
     noticeTimer = setTimeout(function () { box.hidden = true; }, duration || 6000);
   }
 
+  /* 浏览器定位可用性：B站 Toy（App 内 WebView / PC 详情页）与本地调试都走这条 */
+  function canBrowserGeo() {
+    return !!(navigator.geolocation && typeof navigator.geolocation.getCurrentPosition === "function");
+  }
+
   /* 普通浏览器路径：navigator.geolocation（WGS-84）→ 纠偏为 GCJ-02。
-     仅当 window.xhs 不存在时才会走到这里；容器内平台分支优先且浏览器定位被禁，双路径互不干扰。 */
-  function browserLocate(wantSort) {
-    if (!navigator.geolocation || typeof navigator.geolocation.getCurrentPosition !== "function") {
+     仅当 window.xhs 不存在时才会走到这里；容器内平台分支优先且浏览器定位被禁，双路径互不干扰。
+     silent = 进页面时的自动尝试：失败不弹黄条（引导卡/重试条会说人话） */
+  function browserLocate(wantSort, silent) {
+    if (!canBrowserGeo()) {
       locateFail("此环境不支持定位");
       return;
     }
-    showNotice("正在获取定位，若弹出权限窗口请选择允许", 10000);
+    if (!silent) showNotice("正在获取定位，若弹出权限窗口请选择允许", 10000);
     navigator.geolocation.getCurrentPosition(
       function (pos) {
         if (!isFinite(pos.coords.latitude) || !isFinite(pos.coords.longitude)) {
@@ -774,7 +798,7 @@
       });
       return;
     }
-    if (!silent) browserLocate(wantSort); // 浏览器调试环境不自动弹权限
+    browserLocate(wantSort, silent); // 非小红书：浏览器定位（B站 Toy 也走这里）
   }
 
   /* 定位引导：官方 §3.12 要求定位由用户手势触发，页面加载期的自动调用会被平台拦掉——
@@ -784,9 +808,18 @@
     if (state.lat != null) return;
     var mini = getMini();
     if (!mini || typeof mini.getLocation !== "function") {
-      /* 浏览器调试环境：无平台定位能力，跳过引导直接出默认列表 */
-      state.geo = "idle";
-      applyFilters();
+      /* 非小红书（B站 Toy 的 App / 网页壳、本地调试）：这里以前是「直接出默认列表」，
+         于是 Toy 里连权限窗都没弹过，距离永远不出现。
+         现在只要浏览器定位可用就走引导；App 内先静默自动试一次（进页面就问权限），
+         拿不到再交给引导卡/重试条。 */
+      if (!canBrowserGeo()) {
+        state.geo = "idle";
+        applyFilters();
+        return;
+      }
+      if (toyInApp()) { locate("recommend", true); return; }
+      $("geoDesc").textContent = "按你的位置推荐附近能办月卡的车场，远近一目了然";
+      $("geoPanel").hidden = false;
       return;
     }
     $("geoDesc").textContent = "按你的位置推荐附近能办月卡的车场，远近一目了然";
