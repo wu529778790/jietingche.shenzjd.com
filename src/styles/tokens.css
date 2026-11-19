@@ -1,0 +1,25 @@
+/* 设计 token 单一来源：色板与语义变量。
+ *
+ * 谁在用：
+ *   - Docker 版（Next）：src/app/globals.css 第一行 @import 本文件，
+ *     再由 @theme inline 映射成 Tailwind 的 --color-*（bg-brand / text-price 等）
+ *   - 小工具（xhs / B站 Toy）：scripts/build-h5.mjs 构建时把本文件拷进产物根目录，
+ *     产物 index.html 里先引 tokens.css 再引 style.css
+ *
+ * 改色只改这里。两边曾经各写一份 :root，改主色漏改一边就会出现「同一个站两种蓝」。
+ */
+
+:root {
+  /* 底 / 字 / 卡 / 描边 */
+  --background: #f5f6f8;
+  --foreground: #10141c;
+  --card: #ffffff;
+  --border: #e5e7ef;
+  /* 品牌蓝：正片用 --brand，渐变深端用 --brand-deep（小工具的品牌头渐变在用） */
+  --brand: #1b6bff;
+  --brand-deep: #0d3fb0;
+  /* 次要文字 */
+  --muted: #6b7280;
+  /* 价格：卡片 chip 上的现价（弹层大价格用 --brand，与站点一致） */
+  --price: #ff4d2f;
+}

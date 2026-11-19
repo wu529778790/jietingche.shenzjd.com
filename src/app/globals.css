@@ -1,14 +1,5 @@
+@import "../styles/tokens.css";
 @import "tailwindcss";
-
-:root {
-  --background: #f5f6f8;
-  --foreground: #10141c;
-  --card: #ffffff;
-  --border: #e5e7ef;
-  --brand: #1b6bff;
-  --muted: #6b7280;
-  --price: #ff4d2f;
-}
 
 @theme inline {
   --color-background: var(--background);

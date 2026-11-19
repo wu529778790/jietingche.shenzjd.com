@@ -5,18 +5,10 @@
  *     或被 iframe 宿主全屏叠层时按平台常量），fallback 走
  *     var(--safe-area-inset-*, env(...))（PC 模拟器注入变量、真机 env()）
  *   - overscroll-behavior 等新属性仅作增强，Chrome 61 静默丢弃不影响布局
- */
+ *   - 色板不在本文件定义：构建时把 src/styles/tokens.css 拷进产物根目录，
+ *     index.html 先引它再引本文件（与 Docker 版同一个 token 源）
+*/
 
-:root {
-  --background: #f5f6f8;
-  --foreground: #10141c;
-  --card: #ffffff;
-  --border: #e5e7ef;
-  --brand: #1b6bff;
-  --brand-deep: #0d3fb0;
-  --muted: #6b7280;
-  --price: #ff4d2f;
-}
 
 button { font-family: inherit; border: 0; background: none; cursor: pointer; touch-action: manipulation; }
 button:active { opacity: 0.7; }
@@ -305,7 +297,8 @@ body {
 }
 .sheet {
   width: 100%;
-  max-width: 560px;
+  /* 与站点 max-w-lg（32rem = 512px）一致 */
+  max-width: 512px;
   max-height: 88%;
   display: flex;
   flex-direction: column;
@@ -319,6 +312,13 @@ body {
   padding-bottom: calc(16px + var(--page-bottom, 0px) + var(--safe-area-inset-bottom, env(safe-area-inset-bottom, 0px)));
 }
 .sheet-hd { display: flex; align-items: flex-start; margin-bottom: 12px; }
+
+/* 宽屏（B站 Toy 的 PC 壳、桌面浏览器）与站点一致改成居中卡片：
+ * 站点三个弹层都是 sm:items-center + rounded-2xl */
+@media (min-width: 640px) {
+  .mask { align-items: center; }
+  .sheet { border-radius: 16px; max-height: 86%; }
+}
 .sheet-title { font-size: 14px; font-weight: 600; flex: 1; min-width: 0; padding-top: 2px; }
 .sh-close { font-size: 13px; color: var(--muted); padding: 2px 8px; flex-shrink: 0; }
 .sheet-body { min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; }
@@ -446,7 +446,9 @@ body {
   border-radius: 12px;
   background: #fff;
 }
-.sh-qr img { display: block; width: 168px; height: 168px; }
+/* 与站点 PackageSheet 的 max-h-56（224px）对齐：手机上要拿另一台手机扫，
+ * 168 太小会拉远扫码距离 */
+.sh-qr img { display: block; width: 208px; height: 208px; }
 .sh-guide {
   font-size: 11px;
   color: var(--muted);

@@ -314,6 +314,22 @@ if (targetName === "toy") {
 for (const f of ["app.js", "style.css"]) {
   copyFileSync(resolve(SRC_DIR, f), resolve(DIST, f));
 }
+
+/* 设计 token 单一来源：site 与小工具共用 src/styles/tokens.css。
+   拷进产物根目录，并在 index.html 的 style.css 之前插一行 link——
+   色板只在这里定义，改主色不会再漏改一边。 */
+copyFileSync(resolve(ROOT, "src/styles/tokens.css"), resolve(DIST, "tokens.css"));
+{
+  const entry = resolve(DIST, "index.html");
+  writeFileSync(
+    entry,
+    readFileSync(entry, "utf8").replace(
+      '<link rel="stylesheet" href="./style.css" />',
+      '<link rel="stylesheet" href="./tokens.css" />\n  <link rel="stylesheet" href="./style.css" />',
+    ),
+  );
+}
+
 // 纯 JS 二维码编码器（运行时为每个套餐现场画直达码）
 copyFileSync(resolve(ROOT, "node_modules/qrcode-generator/dist/qrcode.js"), resolve(DIST, "qr-encoder.js"));
 
@@ -386,7 +402,7 @@ function scanText(fileLabel, text) {
 
 const violations = [];
 scanText("index.html", readFileSync(resolve(DIST, "index.html"), "utf8"));
-for (const f of ["app.js", "style.css", "data.js", "qr-data.js", "qr-encoder.js"]) {
+for (const f of ["app.js", "tokens.css", "style.css", "data.js", "qr-data.js", "qr-encoder.js"]) {
   scanText(f, readFileSync(resolve(DIST, f), "utf8"));
 }
 for (const name of readdirSync(resolve(DIST, "assets"))) {
@@ -431,6 +447,7 @@ const zipPath = resolve(DIST, TARGET.zipName);
 const zipEntries = [
   "index.html",
   "app.js",
+  "tokens.css",
   "style.css",
   "data.js",
   "qr-data.js",
