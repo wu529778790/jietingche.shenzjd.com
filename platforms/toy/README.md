@@ -67,6 +67,14 @@ AI 调用一律带 `--json`；带包体的 create/update 默认只出预览链�
 5. **App 内真机自检入口**：作品页 2 秒内连点顶部「泊月」品牌头 5 次，弹出「环境诊断」面板，
    一屏显示 UA / 文档层级 / `window.toy` 成员数、权限策略、
    `getCurrentPosition` 实测结果、IP 城市、`toy.channel.getAbilities()` 全表和
-   `isSupport('getLocation')`。截图即可判断 App 内到底有没有下放定位。
-   「全选结果」用 Selection API 选中文本供长按复制——剪贴板 API 被构建门禁禁用。
-   入口无视觉提示，正常用户碰不到，也不参与主流程。
+   `isSupport('getLocation')`。「全选结果」用 Selection API 选中文本供长按复制——
+   剪贴板 API 被构建门禁禁用。入口无视觉提示，正常用户碰不到，也不参与主流程。
+6. **真机定案（2026-11-19，Android 16 / BiliApp 9190400 / 小米 23113RKC6C）**：
+   `toyInApp=true`，文档仍是 iframe，权限策略「被禁」，`getCurrentPosition` 依旧 `code=1`；
+   `abilities(33)` 比网页壳的 24 项多出 `saveImageToAlbum / share / sharePicture / container.*`，
+   **但没有 getLocation**，`isSupport('getLocation') === false`。
+   **App 内也没有定位，这条路径彻底封死**。预览页与正式页 iframe 的
+   `allow="pointer-lock"` 完全一致，所以预览页测得的策略结论通用。
+   ⚠️ 预览页里 `isSupport('saveImageToAlbum') / isSupport('share')` 返回 false 是假阴性：
+   SDK 的 isSupport 在预览页对白名单外能力直接拒绝（源码 `if (isPreview && qe(api)) return false`），
+   而 abilities 表里这两项都在；正式页不受此限。getLocation 不受影响（abilities 里根本没有）。
