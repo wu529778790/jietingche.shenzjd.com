@@ -1,0 +1,135 @@
+name: Toy 发布
+
+# B站 Toy 与 Docker 站的区别：
+#   - Docker 是「镜像 + 换容器」，push 即可全自动；
+#   - Toy 是「zip 上传 + 平台审核」，每次 update 都会把作品打回 auditing，
+#     审核通过前线上还是旧包。所以这里默认**只构建出包**，提交审核要显式勾选。
+#
+# 需要配置的 secret：
+#   TOY_SESSION   本机 ~/.toy/session.json 的完整内容（toy CLI 的登录态）
+#                 刷新方式：本机 `toy login` 后
+#                 `gh secret set TOY_SESSION < ~/.toy/session.json`
+#   说明：session_token 会过期（平台侧策略未公开）。过期后本工作流会在
+#   「校验登录态」这一步失败，重新 toy login + 覆盖 secret 即可，其余步骤不用改。
+#
+# 数据来源：代码在 Git，数据在本地 data/jtc.db（不入库）。
+#   `npm run snapshot` + `npm run snapshot:publish` 会把快照发成 tag 形如
+#   snapshot-20261119-1830 的 Release，本工作流取最新那个。
+
+on:
+  workflow_dispatch:
+    inputs:
+      submit:
+        description: 构建后直接提交审核（不勾选只出预览链接和 zip 附件）
+        type: boolean
+        default: false
+      snapshot_tag:
+        description: 指定快照 Release tag（留空取最新的 snapshot-*）
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: toy-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  TOY_ID: "56799268969472"
+  TOY_ZIP: platforms/toy/dist/zhao-tingche-toy.zip
+
+jobs:
+  build-and-publish:
+    name: 构建 Toy 包并上传
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: 安装依赖
+        run: npm ci
+
+      - name: 取数据快照
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SNAPSHOT_TAG: ${{ inputs.snapshot_tag }}
+        run: |
+          set -euo pipefail
+          TAG="$SNAPSHOT_TAG"
+          if [ -z "$TAG" ]; then
+            TAG=$(gh release list --limit 60 --json tagName \
+              --jq '[.[] | select(.tagName | startswith("snapshot-"))] | sort_by(.tagName) | last | .tagName')
+          fi
+          if [ -z "$TAG" ] || [ "$TAG" = "null" ]; then
+            echo "::error::没找到 snapshot-* 的 Release，先在本机跑 npm run snapshot && npm run snapshot:publish"
+            exit 1
+          fi
+          echo "用快照：$TAG"
+          mkdir -p data
+          gh release download "$TAG" -p jtc-snapshot.json -D data
+          ls -la data/jtc-snapshot.json
+
+      - name: 装 toy CLI
+        run: |
+          set -euo pipefail
+          # runner 在境外，boss.hdslb.com 是境内 CDN：加重试，失败就报清楚
+          if ! curl -fsSL --retry 3 --retry-delay 5 --connect-timeout 20 \
+              https://boss.hdslb.com/toy-cli/toy/install.sh -o /tmp/toy-install.sh; then
+            echo "::error::拉不到 toy CLI 安装脚本（boss.hdslb.com 不可达）"
+            exit 1
+          fi
+          bash /tmp/toy-install.sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          "$HOME/.local/bin/toy" version
+
+      - name: 校验登录态
+        env:
+          TOY_SESSION: ${{ secrets.TOY_SESSION }}
+        run: |
+          set -euo pipefail
+          if [ -z "${TOY_SESSION:-}" ]; then
+            echo "::error::缺 secret TOY_SESSION（本机 toy login 后：gh secret set TOY_SESSION < ~/.toy/session.json）"
+            exit 1
+          fi
+          mkdir -p "$HOME/.toy"
+          printf '%s' "$TOY_SESSION" > "$HOME/.toy/session.json"
+          chmod 600 "$HOME/.toy/session.json"
+          toy whoami --json
+
+      - name: 构建 Toy 包
+        run: npm run toy -- --snapshot data/jtc-snapshot.json
+
+      - name: 上传（出预览 / 提交审核）
+        id: publish
+        env:
+          SUBMIT: ${{ inputs.submit }}
+        run: |
+          set -euo pipefail
+          if [ "$SUBMIT" = "true" ]; then
+            echo "提交审核"
+            OUT=$(toy update "$TOY_ID" "$TOY_ZIP" --json --yes)
+          else
+            echo "只出预览（不提交审核）"
+            OUT=$(toy update "$TOY_ID" "$TOY_ZIP" --json)
+          fi
+          echo "$OUT"
+          PREVIEW=$(printf '%s' "$OUT" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const j=JSON.parse(s);if(j.preview_url)process.stdout.write(j.preview_url)}catch(e){}})')
+          {
+            echo "### Toy $([ "$SUBMIT" = "true" ] && echo 已提交审核 || echo 仅预览)"
+            echo '```json'
+            echo "$OUT"
+            echo '```'
+            [ -n "$PREVIEW" ] && echo "预览：$PREVIEW"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: 保存 zip 附件
+        uses: actions/upload-artifact@v4
+        with:
+          name: zhao-tingche-toy
+          path: platforms/toy/dist/zhao-tingche-toy.zip
+          retention-days: 30
