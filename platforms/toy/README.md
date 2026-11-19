@@ -37,10 +37,26 @@ AI 调用一律带 `--json`；带包体的 create/update 默认只出预览链�
 
 ## 待第一次上传确认的点
 
-1. **是否允许运行期请求外部接口**：小红书沙箱是禁的（构建时就把数据烙进包里），Toy 目前没有公开说明。
-   如果允许，可以给 toy 单独开一条走 `/api/v1/*` 的实时数据（CORS/限流已经就绪）；
-   不允许就继续用快照，包体结构不用改。
+1. **是否允许运行期请求外部接口**：小红书沙箱是禁的（构建时就把数据烙进包里）。
+   **2026-11-19 实测：Toy 允许**——页面本来就是从 hdslb CDN 拉 SDK，跨域 `fetch` 也放行
+   （CORS 头齐全）。目前只用在一处：`minitool/src/ip-city.js` 按出口 IP 判断城市。
+   小红书包不带这个文件（那边的扫描门禁会拦 `fetch`）。
 2. **包体上限**：现在整包约 3MB（130 城分包 2.4MB + 主包）。若 Toy 限制更严，
    用 `--city` 选主城市、其余城市靠分包按需加载。
 3. **平台能力**：分享/打开外链等 API 各平台不同，封一层 `platform.{share,openUrl}` 各自实现，
    不支持就降级成「复制链接 + 二维码」（现在小工具就是二维码兜底，天然可复用）。
+
+## 定位：这台平台上拿不到坐标（2026-11-19 结论）
+
+1. **SDK 没有定位**：`bilibili-toy@0.1.12` 的 README / `toy-sdk.d.ts` 一共 8 个 namespace
+   （rank / cloud / user / author / video / share / container / media），没有 location；
+   线上 `window.toy` 44 个成员里 `isSupport('getLocation') === false`。
+   SDK 内部映射表留着 `system.getLocation → ability.getLocation` 这条老 JSB 兼容项，但没暴露。
+2. **浏览器定位被子文档权限策略禁死**：作品永远跑在 `<iframe allow="pointer-lock">` 里，
+   实测 `document.featurePolicy.allowsFeature('geolocation') === false`，
+   `getCurrentPosition` 立刻 `code=1 "disabled in this document by permissions policy"`
+   ——**连权限窗都不会弹**。同一个 UA 打开外壳页顶层文档时定位是正常的（`ok`），
+   所以不是域名/浏览器问题，是 iframe 的 `allow` 没给 geolocation；子页面无权自我提权。
+3. 因此 Toy 里做不出「距我 500m」：现状是 `ip-city.js` 兜到城市级 + 「位置」手动选城市。
+   哪天官方在 iframe 上放开 `allow="geolocation"`，或 SDK 暴露 `getLocation`，
+   把 `checkGeoAsk` 里那条 `canBrowserGeo()` 分支接上即可，其余逻辑不用动。
