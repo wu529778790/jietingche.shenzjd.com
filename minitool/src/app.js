@@ -20,6 +20,11 @@
    */
   var PLATFORM = window.__JTC_PLATFORM__ || "xhs";
 
+  /* Toy 两条定位路径都已真机定案封死（SDK 无 getLocation + iframe 策略禁地理定位），
+     交互层不能再承诺「距离」：离我最近 → 同区优先（点它选区，选完按同区月均价升序）。
+     小红书保留原定位链路，两个包共用同一份源，所以按平台分支。 */
+  var NO_GEO = PLATFORM === "toy";
+
   /* 展示常量与口径函数全部来自 src/shared/domain.ts（构建时转译成 shared.js）——
      以前是手抄一份，站点改了文案/折算规则这边不会跟，同一个套餐会出现两个价。 */
   var SHARED = window.__JTC_SHARED__;
@@ -199,8 +204,13 @@
       || state.slot || state.maxPrice > 0 || state.sort !== "recommend";
     $("btnReset").hidden = !dirty;
 
-    $("sortDist").className = "filter-pill"
-      + (state.sort === "dist" ? " on" : state.lat == null ? " dim" : "");
+    if (NO_GEO) {
+      /* 没有坐标时「同区优先」的激活态就是已选区，不是坐标排序 */
+      $("sortDist").className = "filter-pill" + (state.district ? " on" : "");
+    } else {
+      $("sortDist").className = "filter-pill"
+        + (state.sort === "dist" ? " on" : state.lat == null ? " dim" : "");
+    }
     $("sortRec").className = "filter-pill" + (state.sort === "recommend" ? " on" : "");
     $("sortPrice").className = "filter-pill" + (state.sort === "price" ? " on" : "");
   }
@@ -368,7 +378,8 @@
       if (kw) {
         html += '<div class="empty-sub">站里收录的是具体车场、楼宇和小区名，<br>换个名称试试，或者直接按位置看。</div>'
           + '<div class="empty-btns">'
-          + '<button class="btn-brand-solid" id="btnNearMe" type="button">按我的位置找附近</button>'
+          + '<button class="btn-brand-solid" id="btnNearMe" type="button">'
+          + (NO_GEO ? "按区找车场" : "按我的位置找附近") + '</button>'
           + '<button class="btn-brand-line" id="btnWholeCity" type="button">看' + esc(cityShort(DATA.city) || "全部") + "车场</button>"
           + "</div>";
       } else {
@@ -1530,6 +1541,11 @@
     if (sortLabel.recommend) $("sortRec").textContent = sortLabel.recommend;
     if (sortLabel.distance) $("sortDist").textContent = sortLabel.distance;
     if (sortLabel.price) $("sortPrice").textContent = sortLabel.price;
+    if (NO_GEO) {
+      $("sortDist").textContent = "同区优先";
+      /* 「使用当前位置」在 Toy 里必失败，早就禁掉了权限策略——藏掉，别给用户死路 */
+      $("useGeo").hidden = true;
+    }
 
     // 试水包只带一个城市（构建时 --max-parks），城市切换没有意义，直接藏掉入口
     if (INDEX.cities.length <= 1) $("btnLoc").hidden = true;
@@ -1550,6 +1566,8 @@
     $("btnReset").addEventListener("click", resetAll);
     $("sortRec").addEventListener("click", function () { setSort("recommend"); });
     $("sortDist").addEventListener("click", function () {
+      /* Toy 没有坐标：按钮是「同区优先」——先选区，选完列表只剩该区且按同区月均价升序 */
+      if (NO_GEO) { openLocPanel(); return; }
       if (state.lat == null) {
         locate("dist");
       } else {
@@ -1572,6 +1590,7 @@
       if (btn.id === "btnNearMe") {
         state.kw = "";
         $("kw").value = "";
+        if (NO_GEO) { openLocPanel(); return; }
         locate("dist");
       } else if (btn.id === "btnWholeCity") {
         state.kw = "";
