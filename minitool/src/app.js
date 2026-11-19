@@ -512,9 +512,10 @@
     }
     $("shGuide").textContent = PLATFORM === "xhs"
       ? "点上方按钮保存凭证图，在停车场官方小程序中从相册选取即可使用"
-      : "用微信扫一扫上方凭证；也可以点上方按钮存到相册，再用微信「扫一扫 → 相册」选取";
+      : "用微信扫一扫上方凭证；点按钮可存到相册（存不进时长按凭证图），再用微信「扫一扫 → 相册」选取";
 
     $("shTip").textContent = "";
+    $("shTip").className = "sh-tip";
     $("sheet").hidden = false;
   }
 
@@ -537,24 +538,26 @@
     }
     var mini = getMini();
     if (!mini || typeof mini.saveImageToPhotosAlbum !== "function") {
-      /* B站 Toy：App 内走平台相册接口（WebView 里 a[download] 根本落不了地），
-         没有 SDK 或调用失败再退回下载 */
+      /* B站 Toy：App 内走平台相册接口（WebView 里 a[download] 根本落不了地）。
+         三种结果分开说话：成功 / 环境不支持 / 真失败（带原因） */
       var fileName = "泊月-" + currentSheet.park.n + "-办理凭证.png";
-      var fallback = function () {
-        downloadDataUrl(qrSrc, fileName);
-        tip.textContent = isMobileUA()
-          ? "已发起保存，若没进相册可长按上方凭证图保存"
-          : "已下载凭证图，用手机微信扫上方二维码即可";
-      };
-      var toyPromise = toySaveImage(qrSrc);
-      if (!toyPromise) { fallback(); return; }
       tip.textContent = "保存中…";
-      toyPromise.then(function (ok) {
-        if (ok) {
+      toySaveImage(qrSrc).then(function (res) {
+        if (res.ok) {
           tip.textContent = "凭证已存入相册 ✓ 打开微信「扫一扫 → 相册」选这张图";
-        } else {
-          fallback();
+          return;
         }
+        if (res.reason === "unsupported" || res.reason === "sdk_missing") {
+          downloadDataUrl(qrSrc, fileName);
+          tip.textContent = "当前环境不支持直接存相册（仅 B站 App 内可用），可长按上方凭证图保存";
+          return;
+        }
+        /* 走到这里是真的失败了：把 SDK 的原始报错摆出来，
+           用户截图发过来就能判断是权限被拒还是接口问题 */
+        tip.className = "sh-tip err";
+        tip.textContent = "保存失败：" + res.reason
+          + "。请到手机「设置 → 应用 → 哔哩哔哩 → 权限」里允许存储/照片，再点一次；也可长按上方凭证图保存";
+        if (window.console && console.warn) console.warn("[save-qr] " + res.reason);
       });
       return;
     }
@@ -853,17 +856,36 @@
     } catch (e) { /* 保持常量兜底 */ }
   }
 
-  /* 存办理凭证：App 内走平台相册接口（WebView 里 a[download] 不落地），
-     不支持或失败再退回下载。返回 Promise<boolean> 表示已交给平台处理。 */
+  /* 存办理凭证：App 内走平台相册接口（WebView 里 a[download] 不落地）。
+     返回 Promise<{ ok, reason }>——reason 原样带回 SDK 的报错文案，
+     真机上「点了没反应/没进相册」时，把界面提示截图就能判断是权限被拒、
+     预览态不支持，还是接口报错，不用连电脑抓控制台。 */
   function toySaveImage(dataUrl) {
     var t = toySdk();
-    if (!t || typeof t.saveImageToAlbum !== "function") return null;
-    try {
-      return t.saveImageToAlbum({
-        base64Data: dataUrl,
-        hintMsg: "需要相册权限来保存办理凭证",
-      }).then(function () { return true; }).catch(function () { return false; });
-    } catch (e) { return null; }
+    if (!t || typeof t.saveImageToAlbum !== "function") {
+      return Promise.resolve({ ok: false, reason: "sdk_missing" });
+    }
+    var call = function () {
+      try {
+        return Promise.resolve(t.saveImageToAlbum({
+          base64Data: dataUrl,
+          hintMsg: "需要相册权限才能把办理凭证存到相册",
+        })).then(function (res) {
+          return { ok: true, path: (res && res.localPath) || "" };
+        }).catch(function (err) {
+          var reason = (err && (err.type || err.code ? (err.type || "code " + err.code) : "")) || "";
+          var msg = (err && err.message) || "";
+          return { ok: false, reason: msg || reason || "unknown" };
+        });
+      } catch (e) {
+        return Promise.resolve({ ok: false, reason: (e && e.message) || "throw" });
+      }
+    };
+    if (typeof t.isSupport !== "function") return call();
+    /* 预览态 / Web 端 isSupport 为 false，此时不该让用户对着「保存失败」发呆 */
+    return Promise.resolve(t.isSupport("saveImageToAlbum"))
+      .then(function (ok) { return ok ? call() : { ok: false, reason: "unsupported" }; })
+      .catch(function () { return call(); });
   }
 
   /* 分享：只能分享本 Toy 内的相对路径，完整链接由平台生成 */

@@ -436,6 +436,8 @@ body {
 }
 .block-btn { display: block; width: 100%; padding: 11px 0; font-size: 15px; border-radius: 12px; }
 .sh-tip { text-align: center; font-size: 12px; color: var(--brand); min-height: 16px; margin-top: 8px; }
+/* 保存失败要把 SDK 原话摆出来，字多，左对齐比居中好读 */
+.sh-tip.err { text-align: left; color: var(--price); line-height: 1.6; }
 /* 凭证图容器：只在非小红书容器出现（B 站 Toy / 浏览器要能直接扫） */
 .sh-qr {
   display: flex;
@@ -447,8 +449,17 @@ body {
   background: #fff;
 }
 /* 与站点 PackageSheet 的 max-h-56（224px）对齐：手机上要拿另一台手机扫，
- * 168 太小会拉远扫码距离 */
-.sh-qr img { display: block; width: 208px; height: 208px; }
+ * 168 太小会拉远扫码距离。
+ * 全局 body 关了 -webkit-touch-callout（防长按选中），凭证图必须单独放开：
+ * 平台相册接口失败时，「长按 → 存储图像」是唯一还能把码拿走的退路。 */
+.sh-qr img {
+  display: block;
+  width: 208px;
+  height: 208px;
+  -webkit-touch-callout: default;
+  -webkit-user-select: auto;
+  user-select: auto;
+}
 .sh-guide {
   font-size: 11px;
   color: var(--muted);
