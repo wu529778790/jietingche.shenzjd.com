@@ -842,8 +842,12 @@
       if (window.self === window.top) return;
       var ua = navigator.userAgent || "";
       var ios = /iPhone|iPad|iPod/i.test(ua);
-      /* 桌面壳是「整页 iframe 在站点头部之下」，叠层不压内容，让了就是白留一片 */
-      if (!ios && !/Android|Mobile/i.test(ua) && window.innerWidth > 600) return;
+      /* 只认「真·移动容器」：UA 带 iPhone/iPad/Android/Mobile/BiliApp。
+         以前多放了一条「桌面 UA 但窗口宽度 ≤600 也算」，本意是抓手机浏览器，
+         结果 Toy 发布台 PC 预览壳（约 270px 的 iframe、桌面 UA）被判成手机，
+         白塞 84px——预览里英雄卡上方一大片空白，而宿主工具条明明在 iframe 外面。
+         宽窄不等于是不是手机：窄 iframe 恰恰是桌面预览壳的常态，所以这里只信 UA。 */
+      if (!/iPhone|iPad|iPod|Android|Mobile|BiliApp/i.test(ua)) return;
       var root = document.documentElement.style;
       if (!root.getPropertyValue("--page-top")) {
         root.setProperty("--page-top", (ios ? 100 : 84) + "px");
