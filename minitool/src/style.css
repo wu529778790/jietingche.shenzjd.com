@@ -420,6 +420,17 @@ body { background: var(--background); color: var(--foreground); }
 }
 .block-btn { display: block; width: 100%; padding: 11px 0; font-size: 15px; border-radius: 12px; }
 .sh-tip { text-align: center; font-size: 12px; color: var(--brand); min-height: 16px; margin-top: 8px; }
+/* 凭证图容器：只在非小红书容器出现（B 站 Toy / 浏览器要能直接扫） */
+.sh-qr {
+  display: flex;
+  justify-content: center;
+  margin: 2px 0 12px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: #fff;
+}
+.sh-qr img { display: block; width: 168px; height: 168px; }
 .sh-guide {
   font-size: 11px;
   color: var(--muted);

@@ -122,9 +122,13 @@
       </div>
       <div id="shPkg" class="sh-price-row"></div>
       <div id="shRule" class="sh-rule-top" hidden></div>
+      <!-- 凭证图只在非小红书容器渲染（B 站 Toy / 浏览器要能直接扫）；小红书机审红线，见 app.js -->
+      <div id="shQr" class="sh-qr" hidden>
+        <img id="shQrImg" alt="办理凭证" />
+      </div>
       <button id="shSave" class="btn-primary block-btn" type="button">保存办理凭证到相册</button>
       <div id="shTip" class="sh-tip"></div>
-      <div class="sh-guide">凭证已存入相册，在停车场官方小程序中从相册选取即可使用</div>
+      <div id="shGuide" class="sh-guide"></div>
       <div class="sh-foot">价格与规则以官方页面为准，使用前请确认出场时间限制</div>
     </div>
   </div>

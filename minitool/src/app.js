@@ -13,6 +13,13 @@
   var QR_GLOBAL = (window.__JTC_QR__ && window.__JTC_QR__.global) || "";
   var SHARE_CODE = window.__JTC_SHARE__ || "";
 
+  /**
+   * 容器平台。默认 xhs——小红书机审不允许页面出现码图，凭证只能在点击时
+   * 内存生成写相册，所以未注入时按最严的走。B 站 Toy 构建时注入 "toy"，
+   * 弹层直接显示码（那里的用户要能一眼扫出来，否则工具等于没有出口）。
+   */
+  var PLATFORM = window.__JTC_PLATFORM__ || "xhs";
+
   /* 展示常量与站点 src/lib/types.ts 对齐 */
   var TYPE_LABEL = { "1": "月卡", "2": "日卡", "3": "次卡", "4": "年卡", "5": "半年卡", "6": "季卡" };
   var TYPE_ORDER = ["1", "6", "5", "4", "2", "3"];            // 月/季/半年/年/日/次（站点 PACKAGE_TYPES 顺序）
@@ -441,6 +448,20 @@
     return canvas.toDataURL("image/png");
   }
 
+  /** 非小红书容器（B 站 Toy / 桌面浏览器）存图：没有平台相册 API，用 a[download] */
+  function downloadDataUrl(dataUrl, filename) {
+    var a = document.createElement("a");
+    a.href = dataUrl;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  }
+
+  function isMobileUA() {
+    return /Android|iPhone|iPad|iPod|Mobile|MicroMessenger/i.test(navigator.userAgent);
+  }
+
   function openSheet(item, pkg) {
     var park = item.park;
     $("shPark").textContent = park.n;
@@ -481,9 +502,25 @@
       ruleTop.hidden = true;
     }
 
-    /* 凭证图不在页面渲染（机审红线）：点「保存办理凭证」时内存生成、直接写相册 */
     currentSheet = { park: park, pkg: pkg };
-    $("shSave").hidden = packageUrl(park, pkg) === "";
+    var qrUrl = packageUrl(park, pkg);
+    $("shSave").hidden = qrUrl === "";
+
+    /* 凭证图：小红书一律不渲染（机审红线，只在点击时内存生成写相册）；
+       Toy / 浏览器不把码摆出来，用户就没有任何办理入口 */
+    var qrBox = $("shQr");
+    var qrImg = $("shQrImg");
+    var qrData = PLATFORM === "xhs" || !qrUrl ? "" : drawQrDataUrl(qrUrl);
+    if (qrData) {
+      qrImg.src = qrData;
+      qrBox.hidden = false;
+    } else {
+      qrImg.removeAttribute("src");
+      qrBox.hidden = true;
+    }
+    $("shGuide").textContent = PLATFORM === "xhs"
+      ? "点上方按钮保存凭证图，在停车场官方小程序中从相册选取即可使用"
+      : "用微信扫一扫上方凭证；也可以点上方按钮存到相册，再用微信「扫一扫 → 相册」选取";
 
     $("shTip").textContent = "";
     $("sheet").hidden = false;
@@ -508,7 +545,12 @@
     }
     var mini = getMini();
     if (!mini || typeof mini.saveImageToPhotosAlbum !== "function") {
-      tip.textContent = "浏览器预览环境：凭证图已在内存生成（小红书内点按钮可直接存相册）";
+      /* 非小红书容器（B 站 Toy / 浏览器）：没有平台相册接口，用 a[download] 落地。
+         手机 B 站 App 内同样是这条路——存相册后微信「扫一扫 → 相册」即可。 */
+      downloadDataUrl(qrSrc, "泊月-" + currentSheet.park.n + "-办理凭证.png");
+      tip.textContent = isMobileUA()
+        ? "已存到相册，打开微信「扫一扫 → 相册」选这张图"
+        : "已下载凭证图，用手机微信扫上方二维码即可";
       return;
     }
     getBuildVersion().then(function (version) {

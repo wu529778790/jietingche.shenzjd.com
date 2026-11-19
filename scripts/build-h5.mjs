@@ -292,6 +292,22 @@ const cityIndex = cityList.map((x, i) => ({
 rmSync(DIST, { recursive: true, force: true });
 mkdirSync(resolve(DIST, "assets"), { recursive: true });
 copyFileSync(resolve(SRC_DIR, "index.html"), resolve(DIST, "index.html"));
+
+/*
+ * 平台标记。小红书容器里凭证图一律不渲染（机审红线，见 app.js 的 PLATFORM 注释）；
+ * B 站 Toy 没这条限制，不把码摆出来用户就没有办理入口，所以构建时注入 "toy"
+ * 让弹层直接显示二维码。改注入不改源文件，小红书包永远走最严的那条分支。
+ */
+if (targetName === "toy") {
+  const entry = resolve(DIST, "index.html");
+  writeFileSync(
+    entry,
+    readFileSync(entry, "utf8").replace(
+      '  <script src="./qr-encoder.js"></script>',
+      '  <script>window.__JTC_PLATFORM__="toy";</script>\n  <script src="./qr-encoder.js"></script>',
+    ),
+  );
+}
 for (const f of ["app.js", "style.css"]) {
   copyFileSync(resolve(SRC_DIR, f), resolve(DIST, f));
 }
