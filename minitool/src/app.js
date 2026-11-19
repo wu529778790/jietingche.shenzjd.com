@@ -20,22 +20,16 @@
    */
   var PLATFORM = window.__JTC_PLATFORM__ || "xhs";
 
-  /* 展示常量与站点 src/lib/types.ts 对齐 */
-  var TYPE_LABEL = { "1": "月卡", "2": "日卡", "3": "次卡", "4": "年卡", "5": "半年卡", "6": "季卡" };
-  var TYPE_ORDER = ["1", "6", "5", "4", "2", "3"];            // 月/季/半年/年/日/次（站点 PACKAGE_TYPES 顺序）
-  var SLOT_LABEL = { "0": "全天", "1": "白天", "2": "夜间" };
-  var SLOT_ORDER = ["0", "1", "2"];                            // 站点 TIME_SLOTS：全天/白天/夜间
-  var INDUSTRIES = ["商场", "写字楼", "医院", "景区", "社区", "交通枢纽", "其他"];
-  /* 价格上限档位（站点 PRICE_STEPS：按折合月价，单位分） */
-  var PRICE_STEPS = [
-    { value: 0, label: "不限" },
-    { value: 10000, label: "月均 ¥100 内" },
-    { value: 20000, label: "月均 ¥200 内" },
-    { value: 30000, label: "月均 ¥300 内" },
-    { value: 50000, label: "月均 ¥500 内" },
-  ];
-  /* 官方数据不带精确时长，按类型码推算标准天数折合月价（与站点 monthlyPrice 口径一致） */
-  var TYPE_DAYS = { "1": 30, "2": 1, "3": 1, "4": 365, "5": 180, "6": 90 };
+  /* 展示常量与口径函数全部来自 src/shared/domain.ts（构建时转译成 shared.js）——
+     以前是手抄一份，站点改了文案/折算规则这边不会跟，同一个套餐会出现两个价。 */
+  var SHARED = window.__JTC_SHARED__;
+  if (!SHARED) throw new Error("shared.js 缺失：构建产物不完整，请重新运行 npm run toy / minitool");
+  var TYPE_LABEL = SHARED.TYPE_LABEL;
+  var TYPE_ORDER = SHARED.TYPE_ORDER;        // 月/季/半年/年/日/次（与站点 PACKAGE_TYPES 同序）
+  var SLOT_LABEL = SHARED.SLOT_LABEL;
+  var SLOT_ORDER = SHARED.SLOT_ORDER;        // 全天/白天/夜间（与站点 TIME_SLOTS 同序）
+  var INDUSTRIES = SHARED.INDUSTRIES;
+  var PRICE_STEPS = SHARED.PRICE_STEPS;      // 按折合月价，单位分
 
   var PAGE_SIZE = 30;
   var LOC_MIN_VERSION = 9490;      // getLocation 需客户端 9.49+
@@ -114,10 +108,9 @@
     return m < 1000 ? Math.round(m) + "m" : (m / 1000).toFixed(1) + "km";
   }
 
-  /* 折合月价（分/月）：官方数据无精确时长，按类型码推算；日/次卡折算后必然排后，与站点口径一致 */
+  /* 折合月价（分/月）：官方数据无精确时长，按类型码推算天数，再走共享的 monthlyPrice 口径 */
   function monthlyPriceOf(pkg) {
-    var days = TYPE_DAYS[pkg.t] || 30;
-    return Math.round((pkg.pr || 0) * 30 / days);
+    return SHARED.monthlyPrice(pkg.pr || 0, SHARED.daysOfType(pkg.t));
   }
 
   function minMonthlyOf(list) {
@@ -129,11 +122,9 @@
     return min === Infinity ? 0 : min;
   }
 
-  /* 规则展示层简写（数据原文不动）：官方「X 00:00-23:59」压成「X 全天」式短句 */
+  /* 规则展示层简写（数据原文不动）：共享实现，含「工作日 工作日」这种重复词压缩 */
   function ruleShort(text) {
-    return String(text || "")
-      .replace(/每天\s*00:00-23:59/g, "全天可停")
-      .replace(/(工作日|周末|节假日)\s*00:00-23:59/g, "$1全天");
+    return SHARED.cleanRuleSummary(text || "");
   }
 
   /* 套餐标签：类型 + 时段（全天不重复展示） */
@@ -314,7 +305,7 @@
 
   function chipHtml(item, k) {
     var origin = k.po > k.pr ? '<span class="chip-origin">¥' + yuan(k.po) + "</span>" : "";
-    var month = TYPE_DAYS[k.t] >= 60
+    var month = SHARED.daysOfType(k.t) >= 60
       ? '<div class="chip-month">折合 ¥' + yuan(monthlyPriceOf(k)) + "/月</div>"
       : "";
     return '<button class="pkg-chip" data-park="' + esc(item.key) + '" data-pkg="' + esc(k.id) + '">'
@@ -1118,6 +1109,14 @@
     applyToyInset();
     applyHostTop();
     initShare();
+
+    /* 排序按钮文案与站点 SORT_OPTIONS 同源——以前这里写「价格优先」、站点写「每月最省」 */
+    var sorts = SHARED.SORT_OPTIONS || [];
+    var sortLabel = {};
+    for (var si = 0; si < sorts.length; si++) sortLabel[sorts[si].value] = sorts[si].label;
+    if (sortLabel.recommend) $("sortRec").textContent = sortLabel.recommend;
+    if (sortLabel.distance) $("sortDist").textContent = sortLabel.distance;
+    if (sortLabel.price) $("sortPrice").textContent = sortLabel.price;
 
     // 试水包只带一个城市（构建时 --max-parks），城市切换没有意义，直接藏掉入口
     if (INDEX.cities.length <= 1) $("btnLoc").hidden = true;

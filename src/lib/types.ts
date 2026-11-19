@@ -4,31 +4,17 @@
  * 不引 libsql 的 Row、不引 node:fs，也不放台账/对账等后台专用类型。
  */
 
-export const INDUSTRIES = [
-  "商场",
-  "写字楼",
-  "医院",
-  "景区",
-  "社区",
-  "交通枢纽",
-  "其他",
-] as const;
-
-/** 停车时段（官方 packageInterval：全天 / 白天 / 夜间） */
-export const TIME_SLOTS = ["全天", "白天", "夜间"] as const;
-/** 兼容旧名 */
-export const PERIODS = TIME_SLOTS;
-
-/** 套餐类型（官方 packageType：月/日/次/年/半年/季） */
-export const PACKAGE_TYPES = ["月卡", "季卡", "半年卡", "年卡", "日卡", "次卡"] as const;
-
-export const SORT_OPTIONS = [
-  { value: "recommend", label: "推荐" },
-  { value: "distance", label: "离我最近" },
-  { value: "price", label: "每月最省" },
-] as const;
-
-export type SortValue = (typeof SORT_OPTIONS)[number]["value"];
+/* 展示枚举的单一来源是 src/shared/domain.ts（小工具也用同一份，构建时转译进包）。
+   这里 re-export 保持原有 import 路径不变。 */
+export {
+  INDUSTRIES,
+  TIME_SLOTS,
+  PERIODS,
+  PACKAGE_TYPES,
+  SORT_OPTIONS,
+  PRICE_STEPS,
+} from "@/shared/domain";
+export type { SortValue } from "@/shared/domain";
 
 /**
  * 重点城市：没选城市/没定位时优先展示。
@@ -49,14 +35,7 @@ export const HOT_CITIES = [
   "重庆市", "杭州市", "南京市", "东莞市",
 ] as const;
 
-/** 月均价格档位（分），用于筛选栏：卡种混在一起时，按月均预算筛才可比 */
-export const PRICE_STEPS = [
-  { value: 0, label: "不限" },
-  { value: 10000, label: "月均 ¥100 内" },
-  { value: 20000, label: "月均 ¥200 内" },
-  { value: 30000, label: "月均 ¥300 内" },
-  { value: 50000, label: "月均 ¥500 内" },
-] as const;
+
 
 export interface CarPark {
   id: string;

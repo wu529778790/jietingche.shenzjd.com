@@ -30,6 +30,7 @@ import { dirname, resolve, extname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
 import QRCode from "qrcode";
+import ts from "typescript";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const SRC_DB = resolve(ROOT, "data/jtc.db");
@@ -315,6 +316,31 @@ for (const f of ["app.js", "style.css"]) {
   copyFileSync(resolve(SRC_DIR, f), resolve(DIST, f));
 }
 
+/* 领域常量与口径函数（src/shared/domain.ts）转译成 shared.js：
+   站点直接 import 同一份 TS，小工具拿转译产物挂到 window.__JTC_SHARED__。
+   用 TypeScript 自带的 transpileModule（已在 devDependencies），不引额外打包器；
+   产物按 CommonJS 输出，外面套一层 IIFE 把 exports 转成全局对象。 */
+{
+  const sharedSrc = readFileSync(resolve(ROOT, "src/shared/domain.ts"), "utf8");
+  const { outputText } = ts.transpileModule(sharedSrc, {
+    fileName: "domain.ts",
+    compilerOptions: {
+      target: ts.ScriptTarget.ES2015,
+      module: ts.ModuleKind.CommonJS,
+      removeComments: false,
+    },
+  });
+  writeFileSync(
+    resolve(DIST, "shared.js"),
+    "/* 自动生成：src/shared/domain.ts —— 请改那个文件，不要改这里 */\n"
+    + "(function () {\n"
+    + "var exports = {};\n"
+    + outputText
+    + "\nwindow.__JTC_SHARED__ = exports;\n"
+    + "})();\n",
+  );
+}
+
 /* 设计 token 单一来源：site 与小工具共用 src/styles/tokens.css。
    拷进产物根目录，并在 index.html 的 style.css 之前插一行 link——
    色板只在这里定义，改主色不会再漏改一边。 */
@@ -402,7 +428,7 @@ function scanText(fileLabel, text) {
 
 const violations = [];
 scanText("index.html", readFileSync(resolve(DIST, "index.html"), "utf8"));
-for (const f of ["app.js", "tokens.css", "style.css", "data.js", "qr-data.js", "qr-encoder.js"]) {
+for (const f of ["app.js", "shared.js", "tokens.css", "style.css", "data.js", "qr-data.js", "qr-encoder.js"]) {
   scanText(f, readFileSync(resolve(DIST, f), "utf8"));
 }
 for (const name of readdirSync(resolve(DIST, "assets"))) {
@@ -447,6 +473,7 @@ const zipPath = resolve(DIST, TARGET.zipName);
 const zipEntries = [
   "index.html",
   "app.js",
+  "shared.js",
   "tokens.css",
   "style.css",
   "data.js",

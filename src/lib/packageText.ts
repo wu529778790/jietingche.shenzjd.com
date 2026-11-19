@@ -80,31 +80,9 @@ export function cleanPackageName(raw: string, parkName = ""): string {
   return name || basicClean(original) || original;
 }
 
-/**
- * 规则摘要里会叠出「工作日 工作日 18:30-08:30 / 周末 周末 00:00-23:59」，
- * 把每段开头的重复词压成一个。
- */
-export function cleanRuleSummary(summary: string): string {
-  return String(summary ?? "")
-    .split("/")
-    .map((part) => {
-      const words = part.trim().split(/\s+/).filter(Boolean);
-      if (words.length < 3) return words.join(" ");
-      let i = 1;
-      while (i < words.length && words[i] === words[0]) i += 1;
-      return [words[0], ...words.slice(i)].join(" ");
-    })
-    .filter(Boolean)
-    .map((part) =>
-      part
-        .replace(/^每天 00:00-23:59$/, "全天可停")
-        .replace(/^(工作日|周末|节假日) 00:00-23:59$/, "$1全天"),
-    )
-    .join(" / ");
-}
-
-/** 兼容旧调用名：前端组件一直用 tidyRuleSummary */
-export const tidyRuleSummary = cleanRuleSummary;
+/* 规则摘要清洗与折合月价的单一实现在 src/shared/domain.ts（小工具共用同一份）。
+   这里只 re-export，调用方 import 路径不变。 */
+export { cleanRuleSummary, tidyRuleSummary, monthlyPrice } from "@/shared/domain";
 
 /**
  * 官方套餐名自带车场前缀时裁掉；车场名已经单独展示了。
@@ -116,12 +94,6 @@ export function shortPackageName(parkName: string, packageName: string): string 
   const wrapped = rest.match(/^[（(](.+)[）)]$/);
   if (wrapped) return wrapped[1].trim();
   return rest.replace(/^[·\-—、,，\s]+/, "").trim() || packageName;
-}
-
-/** 折合每月价格（分）。日卡/次卡按各自有效天数折算，用于跨卡种比价。 */
-export function monthlyPrice(price: number, durationDays: number): number {
-  const days = durationDays > 0 ? durationDays : 30;
-  return Math.round((price * 30) / days);
 }
 
 /** 长租卡：够一个月及以上，排序时优先于日卡/次卡 */
