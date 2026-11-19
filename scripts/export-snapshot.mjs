@@ -14,6 +14,7 @@
  * 产物可以直接交给：node scripts/build-h5.mjs --target xhs|toy --snapshot data/jtc-snapshot.json
  */
 import { DatabaseSync } from "node:sqlite";
+import { normalizeDistrict } from "../src/lib/district.ts";
 import { writeFileSync, mkdirSync, existsSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -53,23 +54,28 @@ const rows = db
      WHERE status = 'ENABLE'`,
   )
   .all()
-  .map((r) => ({
-    park_code: r.park_code,
-    park_name: r.park_name,
-    package_name: r.package_name,
-    package_id: r.package_id,
-    package_type: r.package_type,
-    address: r.address,
-    district: r.district,
-    city: r.city,
-    lng: r.lng,
-    lat: r.lat,
-    current_price: r.current_price,
-    origin_price: r.origin_price,
-    package_rules: r.package_rules,
-    // raw 里只有这一个字段进包，单独提出来，其余全丢
-    interval: Number(safeJson(r.raw).packageInterval ?? 0) || 0,
-  }));
+  .map((r) => {
+    const city = String(r.city ?? "");
+    return {
+      park_code: r.park_code,
+      park_name: r.park_name,
+      package_name: r.package_name,
+      package_id: r.package_id,
+      package_type: r.package_type,
+      address: r.address,
+      // 原始池里同一区县有「上海市嘉定区」/「嘉定区」两套写法，包里跟着线上站一起归一，
+      // 否则小工具的城市/区县筛选会出现两个同名项，各只能搜到一半车场
+      district: normalizeDistrict(city, String(r.district ?? "")),
+      city,
+      lng: r.lng,
+      lat: r.lat,
+      current_price: r.current_price,
+      origin_price: r.origin_price,
+      package_rules: r.package_rules,
+      // raw 里只有这一个字段进包，单独提出来，其余全丢
+      interval: Number(safeJson(r.raw).packageInterval ?? 0) || 0,
+    };
+  });
 
 const cities = db
   .prepare("SELECT city_name, longitude, latitude FROM cities WHERE longitude AND latitude")
