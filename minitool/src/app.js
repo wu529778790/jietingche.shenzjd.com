@@ -844,7 +844,7 @@
       if (window.self === window.top) return;
       var ua = navigator.userAgent || "";
       var ios = /iPhone|iPad|iPod/i.test(ua);
-      var mobile = /iPhone|iPad|iPod|Android|Mobile/i.test(ua);
+      var mobile = isMobileUA();
       var inApp = /BiliApp/i.test(ua);
       var root = document.documentElement.style;
       /* 有 toy SDK 但不在 App 内 = 网页壳：内容区已经在壳的顶栏下面，
