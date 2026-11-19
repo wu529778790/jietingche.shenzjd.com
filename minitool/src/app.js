@@ -831,24 +831,32 @@
   }
 
   /* ------------------------------ 宿主全屏叠层避让（B站 Toy 等 iframe 容器） ------------------------------
-     宿主把页面塞进全屏 iframe 后，状态栏和工具条（小电视 / 分享 / 关闭）是画在我们画面上层的，
-     iframe 里 env(safe-area-inset-*) 恒为 0，也读不到宿主尺寸——只能按平台给常量。
-     实测 B站 Android（486px 截图换算）：状态栏 ≈28 + 工具条 ≈44 + 间隙 ≈8 → 取 84，
-     底部操作栏（评论/收藏/点赞）≈52 → 取 60 留余量；iOS 状态栏更高，各加一档。
-     只在「被 iframe 嵌入 + 移动端 UA」时生效：桌面预览壳的工具条在页面外，让了就是白留一片；
-     小红书那边由 getWindowInfo 写入真实值（异步），所以这里只填保底值，随后被覆盖。 */
+     只有「宿主把状态栏/工具条叠在我们画面上层」时才需要让位（App 内就是这样）。
+     Toy 的**网页壳**（PC 详情页、发布台预览）相反：它把状态栏和顶栏画在 iframe 外面，
+     iframe 从顶栏下方开始（实测 iPhone UA 下 iframe y=44），我们再补 100px 就是纯白留。
+     判据用 SDK 自己的那条：UA 带 BiliApp 才是 App 容器（toy-sdk 里就是这个正则）。
+     常量取 B站 Android 实测（486px 截图换算）：状态栏 ≈28 + 工具条 ≈44 + 间隙 ≈8 → 84，
+     底部操作栏（评论/收藏/点赞）≈52 → 60；iOS 状态栏更高，各加一档。
+     App 内真正的值由 applyToyInset（SDK onContainerChange）覆盖，这里只是异步到达前的保底；
+     小红书那边同样由 getWindowInfo 写入真实值，这里只填保底值。 */
   function applyEmbedInset() {
     try {
       if (window.self === window.top) return;
       var ua = navigator.userAgent || "";
       var ios = /iPhone|iPad|iPod/i.test(ua);
-      /* 只认「真·移动容器」：UA 带 iPhone/iPad/Android/Mobile/BiliApp。
-         以前多放了一条「桌面 UA 但窗口宽度 ≤600 也算」，本意是抓手机浏览器，
-         结果 Toy 发布台 PC 预览壳（约 270px 的 iframe、桌面 UA）被判成手机，
-         白塞 84px——预览里英雄卡上方一大片空白，而宿主工具条明明在 iframe 外面。
-         宽窄不等于是不是手机：窄 iframe 恰恰是桌面预览壳的常态，所以这里只信 UA。 */
-      if (!/iPhone|iPad|iPod|Android|Mobile|BiliApp/i.test(ua)) return;
+      var mobile = /iPhone|iPad|iPod|Android|Mobile/i.test(ua);
+      var inApp = /BiliApp/i.test(ua);
       var root = document.documentElement.style;
+      /* 有 toy SDK 但不在 App 内 = 网页壳：内容区已经在壳的顶栏下面，
+         不但不补常量，还要显式写 0 压掉宿主可能注入的 --safe-area-inset-top
+         （CSS 里 var(--page-top, var(--safe-area-inset-top, env(...))) 是这个兜底链）。 */
+      if (window.toy && !inApp) {
+        root.setProperty("--page-top", "0px");
+        root.setProperty("--page-bottom", "0px");
+        return;
+      }
+      /* 其余非移动容器（桌面浏览器）同样不让——桌面壳的顶栏也在页面外 */
+      if (!mobile && !inApp) return;
       if (!root.getPropertyValue("--page-top")) {
         root.setProperty("--page-top", (ios ? 100 : 84) + "px");
       }
@@ -888,11 +896,13 @@
       root.setProperty("--page-bottom", bottom + "px");
     };
     try {
-      t.onContainerChange(apply);
+      /* Web 端调用会抛/拒「not supported on web」，用 Promise.resolve 统一吃掉，
+         否则控制台多出一条 Uncaught (in promise)，与「怎么没生效」混在一起不好排查 */
+      Promise.resolve(t.onContainerChange(apply)).catch(function () { /* 保持现状 */ });
       if (typeof t.getContainerState === "function") {
-        t.getContainerState().then(apply).catch(function () { /* 保持常量兜底 */ });
+        Promise.resolve(t.getContainerState()).then(apply).catch(function () { /* 保持现状 */ });
       }
-    } catch (e) { /* 保持常量兜底 */ }
+    } catch (e) { /* 保持现状 */ }
   }
 
   /* 存办理凭证：App 内走平台相册接口（WebView 里 a[download] 不落地）。
