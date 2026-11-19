@@ -517,6 +517,29 @@
     $("shTip").textContent = "";
     $("shTip").className = "sh-tip";
     $("sheet").hidden = false;
+
+    /* App 里宿主没下发相册能力时（预览页就是这样），按钮点了只会报错——
+       直接换成长按指引，别给一个点了没反应的按钮 */
+    adaptSaveEntry();
+  }
+
+  /* 相册能力探测结果缓存：一次出码弹层只查一次 JSB */
+  var saveAbility = null;
+
+  function adaptSaveEntry() {
+    var t = toySdk();
+    if (!t || typeof t.saveImageToAlbum !== "function") return;   // 非 Toy 环境：按钮保留，a[download] 可用
+    var apply = function (ok) {
+      saveAbility = ok;
+      if (ok) return;
+      /* 只有真的在 App 容器里（UA 有 BiliApp）才藏按钮：那里下载是落不了地的 */
+      if (!toyInApp()) return;
+      $("shSave").hidden = true;
+      $("shGuide").textContent = "长按上方凭证图 →「存储图像」，再用微信「扫一扫 → 相册」选取";
+    };
+    if (saveAbility !== null) { apply(saveAbility); return; }
+    if (typeof t.isSupport !== "function") return;
+    Promise.resolve(t.isSupport("saveImageToAlbum")).then(apply).catch(function () { /* 保持按钮 */ });
   }
 
   function closeSheet() {
