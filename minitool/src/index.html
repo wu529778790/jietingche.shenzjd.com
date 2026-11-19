@@ -136,6 +136,22 @@
     </div>
   </div>
 
+  <!-- 环境诊断（隐藏）：连点品牌头 5 次打开。Toy 没有控制台也没有远程调试，
+       平台到底下放了哪些能力只能靠它真机自证（定位这条尤其） -->
+  <div id="diag" class="mask" hidden>
+    <div class="sheet diag-sheet">
+      <div class="sheet-hd">
+        <div class="sheet-title">环境诊断</div>
+        <button id="diagClose" class="sh-close" type="button">关闭</button>
+      </div>
+      <pre id="diagBody" class="diag-body">检测中…</pre>
+      <div class="fbtns">
+        <button id="diagAgain" class="btn-ghost flex1" type="button">重新检测</button>
+        <button id="diagSelect" class="btn-primary flex1" type="button">全选结果</button>
+      </div>
+    </div>
+  </div>
+
   <script src="./shared.js"></script>
   <script src="./qr-encoder.js"></script>
   <script src="./qr-data.js"></script>

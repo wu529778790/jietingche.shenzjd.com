@@ -1008,6 +1008,215 @@
       .catch(function () { /* 不支持就保持隐藏 */ });
   }
 
+  /* ------------------------------ 环境诊断（隐藏入口：连点品牌头 5 次） ------------------------------
+     Toy 里没有控制台、没有远程调试，「平台到底给没给定位」只能真机自证。
+     这里把三条证据摆在一屏：Permissions Policy、geolocation 实测、SDK 上报的 abilities。
+     入口没有任何视觉提示（2 秒内连点品牌头 5 次），正常用户碰不到，也不参与主流程。 */
+
+  var diagTaps = 0;
+  var diagTapAt = 0;
+
+  function diagMembers(t) {
+    var seen = {};
+    var count = 0;
+    var p = t;
+    while (p && p !== Object.prototype) {
+      var ks = Object.getOwnPropertyNames(p);
+      for (var i = 0; i < ks.length; i++) {
+        if (!seen[ks[i]]) { seen[ks[i]] = 1; count += 1; }
+      }
+      p = Object.getPrototypeOf(p);
+    }
+    return count;
+  }
+
+  function diagSupport(t, cap) {
+    if (!t || typeof t.isSupport !== "function") return Promise.resolve("无 isSupport");
+    var fail = function (e) { return "抛错 " + ((e && e.message) || e); };
+    try {
+      return Promise.resolve(t.isSupport(cap)).then(function (ok) {
+        return ok ? "true" : "false";
+      }, fail);
+    } catch (e) {
+      return Promise.resolve(fail(e));
+    }
+  }
+
+  function diagAbilities(t) {
+    if (!t || !t.channel || typeof t.channel.getAbilities !== "function") return Promise.resolve(null);
+    var fail = function (e) { return "抛错 " + ((e && e.message) || e); };
+    try {
+      return Promise.resolve(t.channel.getAbilities()).then(function (r) { return r; }, fail);
+    } catch (e) {
+      return Promise.resolve(fail(e));
+    }
+  }
+
+  function diagGeoPolicy() {
+    try {
+      var fp = document.featurePolicy || document.permissionsPolicy;
+      if (!fp || typeof fp.allowsFeature !== "function") return "未知（无 featurePolicy）";
+      return fp.allowsFeature("geolocation") ? "允许" : "被禁（Permissions Policy）";
+    } catch (e) {
+      return "未知（" + ((e && e.message) || e) + "）";
+    }
+  }
+
+  function diagPermission() {
+    if (!navigator.permissions || typeof navigator.permissions.query !== "function") {
+      return Promise.resolve("未知（无 permissions API）");
+    }
+    var fail = function (e) { return "未知（" + ((e && e.message) || e) + "）"; };
+    try {
+      return Promise.resolve(navigator.permissions.query({ name: "geolocation" }))
+        .then(function (st) { return (st && st.state) || "未知"; }, fail);
+    } catch (e) {
+      return Promise.resolve(fail(e));
+    }
+  }
+
+  /* 真实发起一次定位：策略被禁会立刻 code=1，权限被拒是 code=1 的另一句话，
+     没有定位源则是超时——三种结果对应三种处置，必须区分开 */
+  function diagGeoProbe() {
+    return new Promise(function (resolve) {
+      if (!navigator.geolocation || typeof navigator.geolocation.getCurrentPosition !== "function") {
+        resolve("不可用（navigator.geolocation 缺失）");
+        return;
+      }
+      var done = false;
+      var timer = setTimeout(function () {
+        if (!done) { done = true; resolve("超时（8 秒无回调）"); }
+      }, 8000);
+      var finish = function (text) {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        resolve(text);
+      };
+      try {
+        navigator.geolocation.getCurrentPosition(function (pos) {
+          finish("成功  lat=" + pos.coords.latitude.toFixed(5)
+            + "  lng=" + pos.coords.longitude.toFixed(5)
+            + "  精度=" + Math.round(pos.coords.accuracy) + "m");
+        }, function (err) {
+          finish("失败  code=" + err.code + "  " + (err.message || ""));
+        }, { timeout: 7500, enableHighAccuracy: true });
+      } catch (e) {
+        finish("抛错  " + ((e && e.message) || e));
+      }
+    });
+  }
+
+  /* Toy 包才有 ip-city.js（小红书的静态扫描会拦 fetch），没有就如实说明 */
+  function diagIpCity() {
+    if (typeof window.__JTC_IPCITY__ !== "function") {
+      return Promise.resolve("未注入（小红书包不带这个文件）");
+    }
+    return new Promise(function (resolve) {
+      var done = false;
+      var timer = setTimeout(function () {
+        if (!done) { done = true; resolve("超时（3 秒）"); }
+      }, 3200);
+      try {
+        window.__JTC_IPCITY__(function (name) {
+          if (done) return;
+          done = true;
+          clearTimeout(timer);
+          resolve(name ? "接口判为「" + name + "」" : "接口没有返回城市");
+        });
+      } catch (e) {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        resolve("抛错  " + ((e && e.message) || e));
+      }
+    });
+  }
+
+  function runDiag() {
+    var body = $("diagBody");
+    if (!body) return;
+    body.textContent = "检测中…（最多 8 秒）";
+
+    var t = toySdk();
+
+    Promise.all([diagGeoProbe(), diagPermission(), diagIpCity()]).then(function (r) {
+      var lines = [
+        "【运行环境】",
+        "UA        " + navigator.userAgent,
+        "文档      " + (window.self === window.top ? "顶层" : "iframe（父页 allow 决定权限）"),
+        "平台      PLATFORM=" + PLATFORM + "  toyInApp=" + toyInApp()
+          + "  window.toy=" + (t ? "object" : typeof window.toy),
+        "视口      " + window.innerWidth + "×" + window.innerHeight
+          + "  dpr=" + (window.devicePixelRatio || 1),
+        "",
+        "【浏览器定位】",
+        "geolocation   " + (navigator.geolocation ? "存在" : "缺失"),
+        "权限策略      " + diagGeoPolicy(),
+        "权限状态      " + r[1],
+        "",
+        "【geolocation 实测】",
+        r[0],
+        "",
+        "【IP 兜底】",
+        r[2],
+        "",
+        "【Toy SDK】",
+      ];
+
+      if (!t) {
+        lines.push("window.toy      不存在（SDK 未注入，或不是 Toy 环境）");
+        return lines;
+      }
+      lines.push("成员数        " + diagMembers(t));
+      return Promise.all([
+        diagSupport(t, "getLocation"),
+        diagSupport(t, "saveImageToAlbum"),
+        diagSupport(t, "share"),
+        diagAbilities(t),
+      ]).then(function (sd) {
+        lines.push("isSupport('getLocation')        " + sd[0]);
+        lines.push("isSupport('saveImageToAlbum')   " + sd[1]);
+        lines.push("isSupport('share')              " + sd[2]);
+        var list = sd[3] && sd[3].abilities ? sd[3].abilities : sd[3];
+        if (Object.prototype.toString.call(list) === "[object Array]") {
+          lines.push("abilities(" + list.length + ")   " + list.join(", "));
+          lines.push("含 getLocation   " + (list.indexOf("getLocation") >= 0 ? "是" : "否"));
+        } else {
+          lines.push("abilities   " + (list === null ? "无此接口" : String(list)));
+        }
+        return lines;
+      });
+    }).then(function (lines) {
+      lines.push("");
+      lines.push("【怎么读】");
+      lines.push("策略被禁 + abilities 无 getLocation = 平台没下放定位，这个环境做不出距离；");
+      lines.push("任一项为开放/有，说明还有戏，把这块截图发出来。");
+      body.textContent = lines.join("\n");
+    }).catch(function (e) {
+      body.textContent = "检测出错：" + ((e && e.message) || e);
+    });
+  }
+
+  /* 容器普遍不给剪贴板 API（构建门禁也明令禁用），所以不做「复制」，改成全选：
+     选中的文本用户长按就出系统菜单，比自绘复制稳，也不会被静态扫描拦下 */
+  function diagSelect() {
+    var body = $("diagBody");
+    if (!body) return;
+    try {
+      var sel = window.getSelection ? window.getSelection() : null;
+      if (sel && document.createRange) {
+        var range = document.createRange();
+        range.selectNodeContents(body);
+        sel.removeAllRanges();
+        sel.addRange(range);
+        showNotice("已全选，长按选中区域即可复制", 4000);
+        return;
+      }
+    } catch (e) { /* 落到下面的提示 */ }
+    showNotice("长按诊断结果可以选中复制", 4000);
+  }
+
   /* ------------------------------ 云存档：跨设备记住「看哪个城市、怎么排序」 ------------------------------
      只存这两个：筛选是一次性决策，恢复它容易让用户打开就是空列表。
      云存储按「登录用户 + 本 Toy」隔离，游客调用会 reject，一律静默。 */
@@ -1292,6 +1501,27 @@
     applyToyInset();
     applyHostTop();
     initShare();
+
+    /* 环境诊断入口：2 秒内连点品牌头 5 次。没有按钮、没有提示，正常用户碰不到 */
+    var brand = document.querySelector(".hero-brand");
+    if (brand) {
+      brand.addEventListener("click", function () {
+        var now = Date.now();
+        if (now - diagTapAt > 2000) diagTaps = 0;
+        diagTapAt = now;
+        diagTaps += 1;
+        if (diagTaps < 5) return;
+        diagTaps = 0;
+        $("diag").hidden = false;
+        runDiag();
+      });
+    }
+    $("diagClose").addEventListener("click", function () { $("diag").hidden = true; });
+    $("diagAgain").addEventListener("click", runDiag);
+    $("diagSelect").addEventListener("click", diagSelect);
+    $("diag").addEventListener("click", function (e) {
+      if (e.target === $("diag")) $("diag").hidden = true;
+    });
 
     /* 排序按钮文案与站点 SORT_OPTIONS 同源——以前这里写「价格优先」、站点写「每月最省」 */
     var sorts = SHARED.SORT_OPTIONS || [];

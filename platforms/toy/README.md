@@ -60,3 +60,13 @@ AI 调用一律带 `--json`；带包体的 create/update 默认只出预览链�
 3. 因此 Toy 里做不出「距我 500m」：现状是 `ip-city.js` 兜到城市级 + 「位置」手动选城市。
    哪天官方在 iframe 上放开 `allow="geolocation"`，或 SDK 暴露 `getLocation`，
    把 `checkGeoAsk` 里那条 `canBrowserGeo()` 分支接上即可，其余逻辑不用动。
+4. **别被「顶层页能定位」误导**（2026-11-19 复测）：给定位授权并设好坐标后，
+   外层详情页 `www.bilibili.com/toy/...` 的顶层文档 `allowsFeature('geolocation') === true`
+   且 `getCurrentPosition` 能拿到坐标；但作品文档仍在内层 iframe，实测依然是 `code=1`。
+   新窗口打开作品链接只会回到同一个详情页壳，作品还是套在 iframe 里，不是可用出路。
+5. **App 内真机自检入口**：作品页 2 秒内连点顶部「泊月」品牌头 5 次，弹出「环境诊断」面板，
+   一屏显示 UA / 文档层级 / `window.toy` 成员数、权限策略、
+   `getCurrentPosition` 实测结果、IP 城市、`toy.channel.getAbilities()` 全表和
+   `isSupport('getLocation')`。截图即可判断 App 内到底有没有下放定位。
+   「全选结果」用 Selection API 选中文本供长按复制——剪贴板 API 被构建门禁禁用。
+   入口无视觉提示，正常用户碰不到，也不参与主流程。

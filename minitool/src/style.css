@@ -468,6 +468,31 @@ body {
   text-align: center;
 }
 .sh-rule-top { margin: -4px 0 12px; font-size: 12px; line-height: 1.6; color: var(--muted); }
+
+/* ---------- 环境诊断（隐藏入口：连点品牌头 5 次） ---------- */
+.diag-sheet { max-height: 92%; }
+.diag-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-y: contain;
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: rgba(16, 20, 28, 0.03);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+  line-height: 1.7;
+  color: var(--foreground);
+  white-space: pre-wrap;
+  word-break: break-all;
+  /* body 全局关了选中，诊断结果要能长按选中/复制 */
+  -webkit-user-select: text;
+  user-select: text;
+  -webkit-touch-callout: default;
+}
 .sh-addr-top { margin-top: 3px; font-size: 12px; color: var(--muted); line-height: 1.6; }
 .sh-foot { margin-top: 12px; text-align: center; font-size: 11px; color: var(--muted); }
 
