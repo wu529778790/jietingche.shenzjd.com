@@ -28,7 +28,7 @@ import { DatabaseSync } from "node:sqlite";
 import { mkdirSync, copyFileSync, writeFileSync, existsSync, rmSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, resolve, extname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import QRCode from "qrcode";
 import ts from "typescript";
 
@@ -314,6 +314,33 @@ if (targetName === "toy") {
 }
 for (const f of ["app.js", "style.css"]) {
   copyFileSync(resolve(SRC_DIR, f), resolve(DIST, f));
+}
+
+/* 未定义标识符门禁。app.js 是没有构建步骤的 ES5 IIFE：删掉一个顶层变量却漏改引用时，
+   语法检查和 eslint 都发现不了，只有用户点到那一层才抛 ReferenceError
+   （TYPE_DAYS 那次就这么漏到预览了）。用 tsc 的 checkJs 只抓 TS2304，
+   其余 TS2339（window 自定义属性、EventTarget 类型）都是 JS 噪音，忽略。 */
+{
+  const res = spawnSync(
+    "node",
+    [
+      resolve(ROOT, "node_modules/typescript/bin/tsc"),
+      "--noEmit", "--allowJs", "--checkJs",
+      "--lib", "dom,es2017", "--target", "es2017",
+      "--skipLibCheck", "--moduleResolution", "bundler", "--module", "esnext",
+      "--typeRoots", resolve(ROOT, "node_modules/.no-types"),
+      resolve(SRC_DIR, "globals.d.ts"),
+      resolve(DIST, "app.js"),
+    ],
+    { encoding: "utf8" },
+  );
+  const out = `${res.stdout || ""}${res.stderr || ""}`;
+  const missing = out.split("\n").filter((line) => /error TS2304/.test(line));
+  if (missing.length) {
+    console.error("未定义标识符检查未通过（app.js 引用了不存在的变量）：");
+    for (const line of missing) console.error("  ✗ " + line.trim());
+    process.exit(1);
+  }
 }
 
 /* 领域常量与口径函数（src/shared/domain.ts）转译成 shared.js：

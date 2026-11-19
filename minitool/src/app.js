@@ -479,7 +479,7 @@
     if (pkg.v !== "0" && SLOT_LABEL[pkg.v]) facts.push(SLOT_LABEL[pkg.v]);
     var html = pkg.pr > 0 ? '<span class="big-price">¥' + yuan(pkg.pr) + "</span>" : "";
     if (pkg.po > pkg.pr) html += '<span class="origin">¥' + yuan(pkg.po) + "</span>";
-    if (pkg.pr > 0 && TYPE_DAYS[pkg.t] >= 60) {
+    if (pkg.pr > 0 && SHARED.daysOfType(pkg.t) >= 60) {
       html += '<span class="per-month">折合 ¥' + yuan(monthlyPriceOf(pkg)) + "/月</span>";
     }
     for (var f = 0; f < facts.length; f++) html += '<span class="fact">' + esc(facts[f]) + "</span>";
@@ -646,7 +646,7 @@
       applyFilters();
     /* 授权动作后 2 秒内就失败 = 系统层早已拒绝定位（平台不会再弹权限窗）：
        不裸露默认列表，重弹引导卡并写清出路——用户去设置开权限后点卡即成 */
-    if (!silent && locateStartedAt && Date.now() - locateStartedAt < 2000 && getMini()) {
+    if (locateStartedAt && Date.now() - locateStartedAt < 2000 && getMini()) {
       $("geoRetry").hidden = true;
       $("geoDesc").textContent = "定位权限未开启：请到手机「设置」里允许小红书使用定位，再回来点「开启定位」";
       $("geoPanel").hidden = false;
