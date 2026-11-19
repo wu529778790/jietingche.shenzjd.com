@@ -674,6 +674,8 @@
      以前一律写小红书，Toy 里报错会指错地方。 */
   function geoFailCopy(msg) {
     if (getMini()) return msg + "。可到手机设置里允许小红书使用定位，或直接点「位置」手动选城市";
+    /* 容器权限策略禁掉定位时没有「去开权限」这条路，只能手动选城市 */
+    if (!canBrowserGeo()) return msg + "。点「位置」手动选城市，可以按区看附近的车场";
     if (toyInApp()) return msg + "。也可以直接点「位置」手动选城市";
     return msg + "。可在浏览器地址栏允许本站使用定位，或直接点「位置」手动选城市";
   }
@@ -718,9 +720,20 @@
     noticeTimer = setTimeout(function () { box.hidden = true; }, duration || 6000);
   }
 
-  /* 浏览器定位可用性：B站 Toy（App 内 WebView / PC 详情页）与本地调试都走这条 */
+  /* 浏览器定位可用性：B站 Toy（App 内 WebView / PC 详情页）与本地调试都走这条。
+     2026-11-19 实测：Toy 的详情页把页面套在一个 sandbox iframe 里，属性只有
+     allow="pointer-lock"——Chrome 的 Permissions Policy 直接禁掉 geolocation
+     （allowsFeature('geolocation') === false，getCurrentPosition 立刻 code=1
+     "disabled in this document by permissions policy"）。这种情况连权限窗都不会弹，
+     所以要先问一句，别让用户对着「开启定位」点了没反应。
+     没有 featurePolicy 的环境（老 WebView / Safari）无从判断，按可用处理。 */
   function canBrowserGeo() {
-    return !!(navigator.geolocation && typeof navigator.geolocation.getCurrentPosition === "function");
+    if (!navigator.geolocation || typeof navigator.geolocation.getCurrentPosition !== "function") return false;
+    try {
+      var fp = document.featurePolicy || document.permissionsPolicy;
+      if (fp && typeof fp.allowsFeature === "function" && !fp.allowsFeature("geolocation")) return false;
+    } catch (e) { /* 判断不了就当可用 */ }
+    return true;
   }
 
   /* 普通浏览器路径：navigator.geolocation（WGS-84）→ 纠偏为 GCJ-02。
