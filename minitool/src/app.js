@@ -34,6 +34,9 @@
   var PAGE_SIZE = 30;
   var LOC_MIN_VERSION = 9490;      // getLocation 需客户端 9.49+
   var SAVE_MIN_VERSION = 9420;     // saveImageToPhotosAlbum 需客户端 9.42+
+  /* 是否已有明确城市（本地记忆 / 云存档 / 用户手选 / IP 兜底）。
+     只有完全没选过才让 IP 定位去猜，避免老用户每次进来被运营商出口改城市 */
+  var cityChosen = false;
 
   var state = {
     kw: "",
@@ -826,6 +829,9 @@
          现在只要浏览器定位可用就走引导；App 内先静默自动试一次（进页面就问权限），
          拿不到再交给引导卡/重试条。 */
       if (!canBrowserGeo()) {
+        /* 容器把 geolocation 用权限策略禁死了（Toy 就是这样）：
+           没有坐标就没有距离，退一步按 IP 猜城市——用户没选过城市时才有意义 */
+        if (!cityChosen) ipLocateCity();
         state.geo = "idle";
         applyFilters();
         return;
@@ -1060,6 +1066,21 @@
     return String(name || "").replace(/市$/, "") || "城市";
   }
 
+  /* 城市名归一：索引里的 c 是「深圳市」「延边朝鲜族自治州」这种全称，IP 接口给的是「深圳」 */
+  function cityKey(name) {
+    return String(name || "").replace(/[市地区盟]$/, "").replace(/\s/g, "");
+  }
+
+  function matchIndexCity(name) {
+    var k = cityKey(name);
+    if (!k) return null;
+    var cities = (INDEX && INDEX.cities) || [];
+    for (var i = 0; i < cities.length; i++) {
+      if (cityKey(cities[i].c) === k) return cities[i];
+    }
+    return null;
+  }
+
   function lsSet(key, data) {
     try { localStorage.setItem("zc_" + key, JSON.stringify(data)); return true; } catch (e) { return false; }
   }
@@ -1098,6 +1119,7 @@
   function applyCity(data, entry) {
     if (entry.f) loadedFiles[entry.f] = data;
     DATA = data;
+    cityChosen = true; // 有明确城市了（本地记忆/云存档/IP 兜底/用户手选），IP 不再覆盖
     state.cityFile = entry.f || "";
     state.district = "";
     state.industry = "";
@@ -1147,6 +1169,50 @@
       if (d < bestDist) { bestDist = d; best = c; }
     }
     return best ? { entry: best, distM: bestDist } : null;
+  }
+
+  /* ------------------------------ 城市级 IP 兜底（Toy 等拿不到坐标的容器） ------------------------------
+     Toy 把作品套在 sandbox iframe 里，allow 只有 pointer-lock，Permissions Policy 直接禁掉
+     geolocation（连权限窗都不弹），官方 SDK 也没开放定位——距离在那边做不出来。
+     退一步：按出口 IP 判断城市，至少让用户一进来就落到对的城市，不用先手动点「位置」。
+     接口用 ipip.net 的公开 JSON：{"ret":"ok","data":{"location":["中国","广东","深圳","","移动"]}}，
+     国内可达且 CORS 开放（ipwho.is/ipinfo 实测有的超时、有的走了代理出口到日本，不可靠）。
+     只做城市级，绝不拿它算距离——IP 落点是运营商出口，跟用户实际位置能差几十公里。 */
+  var IP_CITY_TTL = 7 * 24 * 3600 * 1000;
+  var ipCityTried = false;
+
+  function fetchIpCity(done) {
+    /* 请求本身在 ip-city.js（只有 toy 包注入）：小红书包禁止任何网络请求，
+       扫描门禁会把带 fetch 的文件拦下来，所以这段代码不能出现在 app.js 里 */
+    var hook = window.__JTC_IPCITY__;
+    if (typeof hook !== "function") { done(""); return; }
+    try { hook(done); } catch (e) { done(""); }
+  }
+
+  function applyIpCity(name, fromCache) {
+    var entry = matchIndexCity(name);
+    if (!entry) return;
+    if ((entry.f || "") === state.cityFile) return; // 已经在看这个城市，别抖一下
+    pickCity(entry, function () {
+      if (!fromCache) showNotice("已按网络定位到" + cityShort(entry.c) + "，点「位置」可以换城市", 9000);
+    });
+  }
+
+  function ipLocateCity() {
+    if (ipCityTried) return;
+    ipCityTried = true;
+    storageGet("ipcity", function (saved) {
+      /* 7 天内不重复请求；移动网络换城市很常见，缓存太久会误导 */
+      if (saved && saved.c && saved.t && Date.now() - saved.t < IP_CITY_TTL) {
+        applyIpCity(saved.c, true);
+        return;
+      }
+      fetchIpCity(function (name) {
+        if (!name) return; // 接口挂了就保持默认城市，不打扰
+        storageSet("ipcity", { c: name, t: Date.now() });
+        applyIpCity(name, false);
+      });
+    });
   }
 
   /* ------------------------------ 位置弹层（LocationSheet 同款：当前位置 + 城市 + 区域） ------------------------------ */

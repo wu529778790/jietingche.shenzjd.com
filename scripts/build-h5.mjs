@@ -308,9 +308,13 @@ if (targetName === "toy") {
       // @toy-sdk：官方 SDK 走协议相对地址（自带 https 判定），容器安全区 / 相册 / 分享都靠它
       '  <script>window.__JTC_PLATFORM__="toy";</script>\n'
       + '  <script src="//s1.hdslb.com/bfs/seed/toy/app/sdk/toy-sdk.js"></script>\n'
+      // @toy-ipcity：Toy 拿不到经纬度（容器禁 geolocation + SDK 无定位），按 IP 兜底到城市级
+      + '  <script src="./ip-city.js"></script>\n'
       + '  <script src="./qr-encoder.js"></script>',
     ),
   );
+  // 小红书包不带这个文件：那边禁止一切网络请求，扫描门禁会直接拦（见下文 BANNED）
+  copyFileSync(resolve(SRC_DIR, "ip-city.js"), resolve(DIST, "ip-city.js"));
 }
 for (const f of ["app.js", "style.css"]) {
   copyFileSync(resolve(SRC_DIR, f), resolve(DIST, f));
@@ -445,8 +449,13 @@ const BANNED = [
   { re: /url\(\s*["']?https?:/i, label: "外部 CSS 资源" },
 ];
 
-function scanText(fileLabel, text) {
+/* 网络类规则是小红书 §6 的口径；Toy 的 ip-city.js 是一次有意的跨域 GET（见该文件头注释），
+   逐条列出来放开，别为了它把整张表放宽 */
+const NETWORK_LABELS = new Set(["fetch()", "XMLHttpRequest", "WebSocket", "EventSource", "RTCPeerConnection"]);
+
+function scanText(fileLabel, text, opts) {
   for (const rule of BANNED) {
+    if (opts && opts.allowNetwork && NETWORK_LABELS.has(rule.label)) continue;
     if (!rule.re.test(text)) continue;
     if (rule.allow && rule.allow(text)) continue;
     violations.push(`${fileLabel}: ${rule.label}`);
@@ -455,8 +464,10 @@ function scanText(fileLabel, text) {
 
 const violations = [];
 scanText("index.html", readFileSync(resolve(DIST, "index.html"), "utf8"));
-for (const f of ["app.js", "shared.js", "tokens.css", "style.css", "data.js", "qr-data.js", "qr-encoder.js"]) {
-  scanText(f, readFileSync(resolve(DIST, f), "utf8"));
+const scanFiles = ["app.js", "shared.js", "tokens.css", "style.css", "data.js", "qr-data.js", "qr-encoder.js"];
+if (existsSync(resolve(DIST, "ip-city.js"))) scanFiles.push("ip-city.js");
+for (const f of scanFiles) {
+  scanText(f, readFileSync(resolve(DIST, f), "utf8"), { allowNetwork: f === "ip-city.js" });
 }
 for (const name of readdirSync(resolve(DIST, "assets"))) {
   if (!/\.(html|css|js)$/.test(extname(name))) continue;
@@ -506,6 +517,7 @@ const zipEntries = [
   "data.js",
   "qr-data.js",
   "qr-encoder.js",
+  ...(existsSync(resolve(DIST, "ip-city.js")) ? ["ip-city.js"] : []),
   ...(TARGET.platformManifest ? ["mini_tool.json"] : []),
   // 试水包没有城市分包，assets/ 是空目录，不塞进 zip（避免打包工具报空目录）
   ...(cityFiles > 0 ? ["assets"] : []),

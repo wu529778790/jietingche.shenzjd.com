@@ -19,6 +19,8 @@ interface Window {
   __JTC_PLATFORM__?: string;
   __JTC_SHARED__?: unknown;
   __JTC_CITY_DATA__?: unknown;
+  /** ip-city.js（仅 toy 包注入）：按出口 IP 取城市名，回调一定被调用，拿不到给空串 */
+  __JTC_IPCITY__?: (done: (name: string) => void) => void;
   xhs?: unknown;
   toy?: unknown;
   webkit?: unknown;
