@@ -51,7 +51,8 @@ export default function ParkCard({ park, onPick }: Props) {
         {park.packages.length === 0 ? (
           <span className="text-xs text-muted">暂无在售套餐</span>
         ) : null}
-        {park.packages.slice(0, 6).map((pkg) => (
+        {/* 套餐全展示：比价工具的价值就在这些价格上，藏掉一半用户就看不出差价 */}
+        {park.packages.map((pkg) => (
           <button
             key={pkg.id}
             onClick={() => onPick(park, pkg)}
@@ -77,11 +78,6 @@ export default function ParkCard({ park, onPick }: Props) {
             ) : null}
           </button>
         ))}
-        {park.packages.length > 6 ? (
-          <span className="self-center text-[11px] text-muted">
-            还有 {park.packages.length - 6} 个套餐
-          </span>
-        ) : null}
       </div>
     </article>
   );

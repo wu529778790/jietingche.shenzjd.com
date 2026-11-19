@@ -218,13 +218,6 @@ body {
   margin-left: 4px;
 }
 .chip-month { margin-top: 1px; font-size: 10px; color: var(--muted); }
-.chip-more {
-  display: inline-block;
-  font-size: 11px;
-  color: var(--muted);
-  padding: 12px 2px;
-  vertical-align: middle;
-}
 
 /* ---------- 定位中骨架屏（站点 HomeSearch 同款：定位没定下来不出真列表） ---------- */
 .skel-card {

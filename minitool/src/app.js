@@ -328,10 +328,10 @@
     var dist = item.d != null ? '<span class="tag tag-brand">' + distText(item.d) + "</span>" : "";
     var industry = p.i ? '<span class="tag tag-muted">' + esc(p.i) + "</span>" : "";
     var sub = (p.d ? p.d : "") + (p.i ? " · " + p.i : "") + (p.a ? " · " + p.a : "");
+    /* 套餐全展示：这个工具的价值就是比价，藏掉一半等于让用户看不出差价。
+       单个车场最多 21 个套餐，多一两行也比「还有 N 个套餐」这种死提示强。 */
     var chips = "";
-    var shown = Math.min(item.pkgs.length, 6);
-    for (var i = 0; i < shown; i++) chips += chipHtml(item, item.pkgs[i]);
-    if (item.pkgs.length > 6) chips += '<span class="chip-more">还有 ' + (item.pkgs.length - 6) + " 个套餐</span>";
+    for (var i = 0; i < item.pkgs.length; i++) chips += chipHtml(item, item.pkgs[i]);
     return '<div class="card">'
       + '<div class="card-hd">'
       + '<div class="card-main">'
