@@ -304,7 +304,10 @@ if (targetName === "toy") {
     entry,
     readFileSync(entry, "utf8").replace(
       '  <script src="./qr-encoder.js"></script>',
-      '  <script>window.__JTC_PLATFORM__="toy";</script>\n  <script src="./qr-encoder.js"></script>',
+      // @toy-sdk：官方 SDK 走协议相对地址（自带 https 判定），容器安全区 / 相册 / 分享都靠它
+      '  <script>window.__JTC_PLATFORM__="toy";</script>\n'
+      + '  <script src="//s1.hdslb.com/bfs/seed/toy/app/sdk/toy-sdk.js"></script>\n'
+      + '  <script src="./qr-encoder.js"></script>',
     ),
   );
 }

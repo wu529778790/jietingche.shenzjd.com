@@ -1,7 +1,8 @@
 /* 泊月·小红书小工具 v3 —— 样式全面对齐线上站（src/app/globals.css + HomeSearch.tsx）
  * 基线层全部兼容 Chrome 61（Android 8.1 WebView）：
  *   - 不用 flex gap（子项 margin 基线）、不用 aspect-ratio/clamp()/max()/逻辑属性/:has()
- *   - 安全区：--page-top 由 JS 写入（getWindowInfo 探测容器顶栏），fallback 走
+ *   - 安全区：--page-top / --page-bottom 由 JS 写入（getWindowInfo 探测容器顶栏、
+ *     或被 iframe 宿主全屏叠层时按平台常量），fallback 走
  *     var(--safe-area-inset-*, env(...))（PC 模拟器注入变量、真机 env()）
  *   - overscroll-behavior 等新属性仅作增强，Chrome 61 静默丢弃不影响布局
  */
@@ -266,7 +267,17 @@ body {
 
 .sentinel { height: 2px; }
 .no-more { padding: 12px 0 0; text-align: center; font-size: 11px; color: var(--muted); }
-.ft { text-align: center; font-size: 11px; color: #b3bccb; padding: 16px 14px 20px; padding-bottom: calc(20px + var(--safe-area-inset-bottom, env(safe-area-inset-bottom, 0px))); }
+.ft-share {
+  display: block;
+  margin: 0 auto 12px;
+  padding: 8px 16px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--card);
+  color: var(--foreground);
+  font-size: 12px;
+}
+.ft { text-align: center; font-size: 11px; color: #b3bccb; padding: 16px 14px 20px; padding-bottom: calc(20px + var(--page-bottom, 0px) + var(--safe-area-inset-bottom, env(safe-area-inset-bottom, 0px))); }
 
 /* ---------- 通用按钮（站点 .btn-primary / .btn-ghost） ---------- */
 .btn-primary, .btn-ghost {
@@ -304,7 +315,8 @@ body {
   background: var(--card);
   border-radius: 16px 16px 0 0;
   padding: 16px 16px 20px;
-  padding-bottom: calc(16px + var(--safe-area-inset-bottom, env(safe-area-inset-bottom, 0px)));
+  /* 同为宿主叠层让位：底部抽屉的按钮不能被 B站底栏盖住 */
+  padding-bottom: calc(16px + var(--page-bottom, 0px) + var(--safe-area-inset-bottom, env(safe-area-inset-bottom, 0px)));
 }
 .sheet-hd { display: flex; align-items: flex-start; margin-bottom: 12px; }
 .sheet-title { font-size: 14px; font-weight: 600; flex: 1; min-width: 0; padding-top: 2px; }

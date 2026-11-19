@@ -222,6 +222,7 @@
   function setSort(sort) {
     state.sort = sort;
     applyFilters();
+    scheduleCloudSave();
   }
 
   /* ------------------------------ 筛选弹层（FilterSheet 同款四维，确定才生效） ------------------------------ */
@@ -545,12 +546,25 @@
     }
     var mini = getMini();
     if (!mini || typeof mini.saveImageToPhotosAlbum !== "function") {
-      /* 非小红书容器（B 站 Toy / 浏览器）：没有平台相册接口，用 a[download] 落地。
-         手机 B 站 App 内同样是这条路——存相册后微信「扫一扫 → 相册」即可。 */
-      downloadDataUrl(qrSrc, "泊月-" + currentSheet.park.n + "-办理凭证.png");
-      tip.textContent = isMobileUA()
-        ? "已存到相册，打开微信「扫一扫 → 相册」选这张图"
-        : "已下载凭证图，用手机微信扫上方二维码即可";
+      /* B站 Toy：App 内走平台相册接口（WebView 里 a[download] 根本落不了地），
+         没有 SDK 或调用失败再退回下载 */
+      var fileName = "泊月-" + currentSheet.park.n + "-办理凭证.png";
+      var fallback = function () {
+        downloadDataUrl(qrSrc, fileName);
+        tip.textContent = isMobileUA()
+          ? "已发起保存，若没进相册可长按上方凭证图保存"
+          : "已下载凭证图，用手机微信扫上方二维码即可";
+      };
+      var toyPromise = toySaveImage(qrSrc);
+      if (!toyPromise) { fallback(); return; }
+      tip.textContent = "保存中…";
+      toyPromise.then(function (ok) {
+        if (ok) {
+          tip.textContent = "凭证已存入相册 ✓ 打开微信「扫一扫 → 相册」选这张图";
+        } else {
+          fallback();
+        }
+      });
       return;
     }
     getBuildVersion().then(function (version) {
@@ -794,6 +808,144 @@
     } catch (e) { /* 保持 env() 兜底 */ }
   }
 
+  /* ------------------------------ 宿主全屏叠层避让（B站 Toy 等 iframe 容器） ------------------------------
+     宿主把页面塞进全屏 iframe 后，状态栏和工具条（小电视 / 分享 / 关闭）是画在我们画面上层的，
+     iframe 里 env(safe-area-inset-*) 恒为 0，也读不到宿主尺寸——只能按平台给常量。
+     实测 B站 Android（486px 截图换算）：状态栏 ≈28 + 工具条 ≈44 + 间隙 ≈8 → 取 84，
+     底部操作栏（评论/收藏/点赞）≈52 → 取 60 留余量；iOS 状态栏更高，各加一档。
+     只在「被 iframe 嵌入 + 移动端 UA」时生效：桌面预览壳的工具条在页面外，让了就是白留一片；
+     小红书那边由 getWindowInfo 写入真实值（异步），所以这里只填保底值，随后被覆盖。 */
+  function applyEmbedInset() {
+    try {
+      if (window.self === window.top) return;
+      var ua = navigator.userAgent || "";
+      var ios = /iPhone|iPad|iPod/i.test(ua);
+      /* 桌面壳是「整页 iframe 在站点头部之下」，叠层不压内容，让了就是白留一片 */
+      if (!ios && !/Android|Mobile/i.test(ua) && window.innerWidth > 600) return;
+      var root = document.documentElement.style;
+      if (!root.getPropertyValue("--page-top")) {
+        root.setProperty("--page-top", (ios ? 100 : 84) + "px");
+      }
+      if (!root.getPropertyValue("--page-bottom")) {
+        root.setProperty("--page-bottom", (ios ? 72 : 60) + "px");
+      }
+    } catch (e) { /* 保持 env() 兜底 */ }
+  }
+
+  /* ------------------------------ B站 Toy SDK（toy-sdk.js，仅 toy 包注入） ------------------------------
+     文档：Toy JS SDK。能力只在 B站 App 内有值，Web 端多数抛 unsupported，
+     所以每个入口都先看 window.toy 在不在、再看 isSupport，缺能力就静默降级到原逻辑。 */
+
+  function toySdk() {
+    return window.toy || null;
+  }
+
+  /* 容器安全区：getContainerState / onContainerChange 给出 CSS px 的 safeArea——
+     App 内这就是状态栏 + 工具条 + 底部操作栏的真实占位，比常量准。
+     订阅会先推一次完整状态，之后仅变化时推；Web 端两个能力都不支持，保持常量兜底。 */
+  function applyToyInset() {
+    var t = toySdk();
+    if (!t || typeof t.onContainerChange !== "function") return;
+    var root = document.documentElement.style;
+    var apply = function (state) {
+      if (!state || !state.safeArea) return;
+      var top = Math.ceil(Number(state.safeArea.top) || 0);
+      var bottom = Math.ceil(Number(state.safeArea.bottom) || 0);
+      root.setProperty("--page-top", top + "px");
+      root.setProperty("--page-bottom", bottom + "px");
+    };
+    try {
+      t.onContainerChange(apply);
+      if (typeof t.getContainerState === "function") {
+        t.getContainerState().then(apply).catch(function () { /* 保持常量兜底 */ });
+      }
+    } catch (e) { /* 保持常量兜底 */ }
+  }
+
+  /* 存办理凭证：App 内走平台相册接口（WebView 里 a[download] 不落地），
+     不支持或失败再退回下载。返回 Promise<boolean> 表示已交给平台处理。 */
+  function toySaveImage(dataUrl) {
+    var t = toySdk();
+    if (!t || typeof t.saveImageToAlbum !== "function") return null;
+    try {
+      return t.saveImageToAlbum({
+        base64Data: dataUrl,
+        hintMsg: "需要相册权限来保存办理凭证",
+      }).then(function () { return true; }).catch(function () { return false; });
+    } catch (e) { return null; }
+  }
+
+  /* 分享：只能分享本 Toy 内的相对路径，完整链接由平台生成 */
+  function initShare() {
+    var t = toySdk();
+    var btn = $("btnShare");
+    if (!btn) return;
+    if (!t || typeof t.share !== "function") return;
+    Promise.resolve(t.isSupport ? t.isSupport("share") : true)
+      .then(function (ok) {
+        if (!ok) return;
+        btn.hidden = false;
+        btn.addEventListener("click", function () {
+          t.share({ path: "index.html" }).catch(function () {
+            btn.hidden = true;
+          });
+        });
+      })
+      .catch(function () { /* 不支持就保持隐藏 */ });
+  }
+
+  /* ------------------------------ 云存档：跨设备记住「看哪个城市、怎么排序」 ------------------------------
+     只存这两个：筛选是一次性决策，恢复它容易让用户打开就是空列表。
+     云存储按「登录用户 + 本 Toy」隔离，游客调用会 reject，一律静默。 */
+
+  var PREF_KEY = "prefs";
+  var prefTimer = null;
+
+  function cloudPrefs() {
+    var t = toySdk();
+    if (!t || typeof t.setCloudStorage !== "function" || typeof t.getCloudStorage !== "function") return null;
+    return t;
+  }
+
+  function scheduleCloudSave() {
+    var t = cloudPrefs();
+    if (!t) return;
+    clearTimeout(prefTimer);
+    prefTimer = setTimeout(function () {
+      try {
+        t.setCloudStorage({
+          prefs: JSON.stringify({ city: (DATA && DATA.city) || "", sort: state.sort }),
+        }).catch(function () { /* 未登录/限流都无所谓，本地记忆还在 */ });
+      } catch (e) { /* 同上 */ }
+    }, 1200);
+  }
+
+  function restoreCloudCity(done) {
+    var finish = function () { done(); };
+    var t = cloudPrefs();
+    if (!t) { finish(); return; }
+    var called = false;
+    var once = function () { if (called) return; called = true; finish(); };
+    var timer = setTimeout(once, 2500);
+    try {
+      t.getCloudStorage([PREF_KEY]).then(function (bag) {
+        clearTimeout(timer);
+        var p = null;
+        try { p = JSON.parse((bag && bag[PREF_KEY]) || "null"); } catch (e) { p = null; }
+        var wrapped = function () {
+          if (p && p.sort) setSort(p.sort);
+          once();
+        };
+        if (p && p.city) {
+          for (var i = 0; i < INDEX.cities.length; i++) {
+            if (INDEX.cities[i].c === p.city) { pickCity(INDEX.cities[i], wrapped); return; }
+          }
+        }
+        wrapped();
+      }).catch(function () { clearTimeout(timer); once(); });
+    } catch (e) { clearTimeout(timer); once(); }
+  }
+
   /* ------------------------------ 城市切换（assets 按需加载 + 选择记忆） ------------------------------ */
 
   function cityShort(name) {
@@ -848,6 +1000,7 @@
     updateFilterBadge();
     applyFilters();
     storageSet("city", { file: entry.f || "", name: DATA.city });
+    scheduleCloudSave();
   }
 
   function pickCity(entry, done) {
@@ -961,7 +1114,10 @@
 
   function init() {
     $("upd").textContent = DATA.updatedAt || "";
+    applyEmbedInset();
+    applyToyInset();
     applyHostTop();
+    initShare();
 
     // 试水包只带一个城市（构建时 --max-parks），城市切换没有意义，直接藏掉入口
     if (INDEX.cities.length <= 1) $("btnLoc").hidden = true;
@@ -1085,7 +1241,8 @@
           if (INDEX.cities[i].f === saved.file) { pickCity(INDEX.cities[i], checkGeoAsk); return; }
         }
       }
-      checkGeoAsk();
+      /* 本地没有城市记忆（换设备 / 清过缓存）：用云存档里的城市兜底，拿不到就照常走定位引导 */
+      restoreCloudCity(checkGeoAsk);
     });
 
     /* 引导卡上任意点击（按钮/遮罩）都算手势：关卡 + 立刻定位——进页面的每个人都走到定位 */
