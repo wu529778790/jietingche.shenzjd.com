@@ -22,6 +22,9 @@ npm run toy -- --snapshot data/jtc-snapshot.json --city 广州市
 
 ## 发布
 
+线上版本：<https://www.bilibili.com/toy/zhao-tingche-toy/index.html>（TOY_ID `56799268969472`，
+发布走 `.github/workflows/toy.yml`，勾 `submit` 才会提交审核）。
+
 B 站有官方 CLI（`bilibili/toy` 仓库的 skills/toy），流程与 redapp 类似：登录 → 上传 → 预览 → 提交审核。
 发布时还要选分发方式，这个在 CLI 参数里给，不写进包（CLI 实际取值 `link-only` / `password` / `public`，默认 link-only）。
 

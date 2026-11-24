@@ -7,6 +7,17 @@
 落地页全部服务端渲染，专门给搜索引擎和分享落地用（见「SEO / 落地页」）。
 管理端全部收在 `/admin/*`，需要口令才能进，前台没有任何入口暴露它们。
 
+## 线上入口
+
+| 入口 | 地址 | 说明 |
+| --- | --- | --- |
+| 主站 | https://jietingche.shenzjd.com | Next 全站：搜索 / 车场落地页 / 出码 / 后台 |
+| B站 Toy | https://www.bilibili.com/toy/zhao-tingche-toy/index.html | 同一份 H5 源打出的静态包，B站 Toy 内测分发 |
+
+> 项目状态：已停止运营维护，不再投入。Docker 站（流量差、无付费转化）、
+> 小红书小工具（一直没过审）、B站 Toy（发布成功但拿不到定位，见
+> `platforms/toy/README.md`）三条线的代码与踩坑记录全部留在仓库里备查。
+
 ## 开发
 
 ```bash
@@ -109,6 +120,7 @@ npm run toy -- --snapshot data/jtc-snapshot.json        # B站 Toy → platforms
 
 - xhs：带 `mini_tool.json`，跑 minitool-zip-builder 的审计；
 - toy：不带平台清单、不跑小红书审计，zip 根目录直接是 `index.html`（详见 `platforms/toy/README.md`）。
+  已发布版本：https://www.bilibili.com/toy/zhao-tingche-toy/index.html
 
 试水包（首审验红线用，只出少数车场，包约 30KB）：
 
