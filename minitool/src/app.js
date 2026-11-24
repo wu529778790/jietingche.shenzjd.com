@@ -835,21 +835,23 @@
     if (state.lat != null) return;
     var mini = getMini();
     if (!mini || typeof mini.getLocation !== "function") {
-      /* 非小红书（B站 Toy 的 App / 网页壳、本地调试）：这里以前是「直接出默认列表」，
-         于是 Toy 里连权限窗都没弹过，距离永远不出现。
-         现在只要浏览器定位可用就走引导；App 内先静默自动试一次（进页面就问权限），
-         拿不到再交给引导卡/重试条。 */
-      if (!canBrowserGeo()) {
-        /* 容器把 geolocation 用权限策略禁死了（Toy 就是这样）：
-           没有坐标就没有距离，退一步按 IP 猜城市——用户没选过城市时才有意义 */
+      /* 非小红书（B站 Toy 的 App / 网页壳、GitHub Pages、本地调试）。
+         NO_GEO（B站 Toy 包）或容器把 geolocation 用权限策略禁死（Toy 的 iframe 就是这样）：
+         没有坐标就没有距离，退一步按 IP 猜城市——用户没选过城市时才有意义 */
+      if (NO_GEO || !canBrowserGeo()) {
         if (!cityChosen) ipLocateCity();
         state.geo = "idle";
         applyFilters();
         return;
       }
       if (toyInApp()) { locate("recommend", true); return; }
-      $("geoDesc").textContent = "按你的位置推荐附近能办月卡的车场，远近一目了然";
-      $("geoPanel").hidden = false;
+      /* 普通浏览器（GitHub Pages / 直连静态站）：
+         1. 先把列表铺出来——以前这里只弹引导卡、state.geo 停在 "boot"，
+            列表区永远停在骨架屏，数据明明在包里，用户看到的是「一片空白，没有车场」；
+         2. 不再盖那张全屏定位遮罩（它只能靠「点一下去定位」关掉，浏览器里没有这个必要）：
+            点「离我最近」或位置面板里的「使用当前位置」本身就是手势，那时候再问权限。 */
+      state.geo = "idle";
+      applyFilters();
       return;
     }
     $("geoDesc").textContent = "按你的位置推荐附近能办月卡的车场，远近一目了然";
