@@ -1,0 +1,106 @@
+name: GitHub Pages（静态包留档）
+
+# 把 platforms/toy/dist 里的静态包发到 GitHub Pages：
+#   https://<owner>.github.io/jietingche/
+# 跟 B 站 Toy 用的是**同一个 zip**（根目录 index.html、资源全相对路径），
+# 所以部署在子目录 /jietingche/ 下也能直接跑，不需要 basePath。
+# 数据、二维码、筛选排序全在包里，Pages 上零后端、零接口。
+#
+# ⚠️ 两个前置条件，缺了会在部署那一步失败：
+#   1. 仓库设置 → Pages → Build and deployment → Source 选「GitHub Actions」；
+#   2. 私有仓库要有 Pro/Team 才有 Pages，Free 计划得先把仓库转 public。
+#
+# 数据来源与 h5.yml 一致：取最近一个 snapshot-* Release 的 jtc-snapshot.json，
+# 不需要配任何 secret。
+#
+# 为什么不顺手发主站：Next 站是 standalone + PPR + 运行时读 SQLite + 15 组写库接口，
+# 静态化等于重写（见 README「GitHub Pages 能不能部署」的结论），这里只发 H5 包。
+
+on:
+  workflow_dispatch:
+    inputs:
+      snapshot_tag:
+        description: 指定快照 Release tag（留空取最新的 snapshot-*）
+        type: string
+        default: ""
+      city:
+        description: 内联进主包的城市（其余城市按需加载）
+        type: string
+        default: 深圳市
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Pages 官方要求：同一时间只跑一个部署，且不要 cancel-in-progress
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: 构建并上传站点
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+
+      - run: npm ci
+
+      - name: 取数据快照
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SNAPSHOT_TAG: ${{ inputs.snapshot_tag }}
+        run: |
+          set -euo pipefail
+          TAG="$SNAPSHOT_TAG"
+          if [ -z "$TAG" ]; then
+            TAG=$(gh release list --limit 60 --json tagName \
+              --jq '[.[] | select(.tagName | startswith("snapshot-"))] | sort_by(.tagName) | last | .tagName')
+          fi
+          if [ -z "$TAG" ] || [ "$TAG" = "null" ]; then
+            echo "::error::没找到 snapshot-* 的 Release，先在本机跑 npm run snapshot && npm run snapshot:publish"
+            exit 1
+          fi
+          echo "用快照：$TAG"
+          mkdir -p data
+          gh release download "$TAG" -p jtc-snapshot.json -D data
+          node -e "const s=require('./data/jtc-snapshot.json');console.log('快照', s.rows.length, '条套餐 /', s.cities.length, '个城市 /', s.generatedAt)"
+
+      - name: 打包 Toy 静态包
+        run: npm run toy -- --snapshot data/jtc-snapshot.json --city "${{ inputs.city || '深圳市' }}"
+
+      - name: 铺到 _site
+        run: |
+          set -euo pipefail
+          rm -rf _site && mkdir -p _site
+          # zip 根目录就是 index.html，解压即站点根目录
+          unzip -q platforms/toy/dist/zhao-tingche-toy.zip -d _site
+          # 不建 .nojekyll 的话，Jekyll 会吞掉 _ 开头的文件
+          touch _site/.nojekyll
+          test -f _site/index.html
+          test -d _site/assets
+          echo "站点：$(find _site -type f | wc -l) 个文件 / $(du -sh _site | cut -f1)"
+          du -sh _site > /tmp/size || true
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    name: 发布
+    needs: build
+    runs-on: ubuntu-24.04
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

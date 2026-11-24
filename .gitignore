@@ -58,6 +58,9 @@ next-env.d.ts
 /minitool/dist/
 /platforms/toy/dist/
 
+# GitHub Pages 部署目录（pages.yml 构建产物，解压自 toy 包）
+/_site/
+
 # 本地发版配置（含服务器密码，绝不能入库）
 /.env.deploy
 /.deploy-stage/

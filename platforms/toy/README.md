@@ -25,6 +25,11 @@ npm run toy -- --snapshot data/jtc-snapshot.json --city 广州市
 线上版本：<https://www.bilibili.com/toy/zhao-tingche-toy/index.html>（TOY_ID `56799268969472`，
 发布走 `.github/workflows/toy.yml`，勾 `submit` 才会提交审核）。
 
+**GitHub Pages 镜像**：`.github/workflows/pages.yml` 把同一个 zip 解压成静态站点发到
+`https://<owner>.github.io/jietingche/`（无后端、无接口，数据全在包里；部署在子目录也能跑，
+因为产物全是相对路径）。前置条件：仓库 Settings → Pages → Source 选「GitHub Actions」，
+私有仓库还要 Pro/Team 才有 Pages。
+
 B 站有官方 CLI（`bilibili/toy` 仓库的 skills/toy），流程与 redapp 类似：登录 → 上传 → 预览 → 提交审核。
 发布时还要选分发方式，这个在 CLI 参数里给，不写进包（CLI 实际取值 `link-only` / `password` / `public`，默认 link-only）。
 
