@@ -102,15 +102,16 @@ npm run db:clean -- --local --dry         # 只预演本地库，看看要改多
 按车场名推断业态（商场/写字楼/医院/景区/社区/交通枢纽）、官方 `<居住推荐>` 等标签转成适用人群。
 已上传的专属码不会被重导入覆盖。
 
-## 静态 H5 产线（小红书小工具 / B站 Toy）
+## 静态 H5 产线（小红书小工具 / B站 Toy / GitHub Pages）
 
-两个平台都是「离线静态包 + 平台审核」，所以共用一份源 `minitool/src`，只按目标产出不同的目录/包名：
+三个产物都是「离线静态包」，共用一份源 `minitool/src`，只按目标产出不同的目录/包名：
 
 ```bash
 npm run snapshot                                        # data/jtc.db → data/jtc-snapshot.json
 npm run snapshot:publish                                # 传到 GitHub Release（tag: snapshot-YYYYMMDD-HHmm）
 npm run minitool -- --snapshot data/jtc-snapshot.json   # 小红书 → minitool/dist/*.zip
 npm run toy -- --snapshot data/jtc-snapshot.json        # B站 Toy → platforms/toy/dist/*.zip
+npm run web -- --snapshot data/jtc-snapshot.json        # 纯浏览器静态站 → platforms/pages/dist/*.zip
 ```
 
 打包脚本在 CI 里跑时拿不到本地的 `data/jtc.db`，所以数据走 Release 附件：
@@ -119,8 +120,15 @@ npm run toy -- --snapshot data/jtc-snapshot.json        # B站 Toy → platforms
 `npm run snapshot:publish -- --keep 5 --prune` 可以把历史快照只留最近 5 个。
 
 - xhs：带 `mini_tool.json`，跑 minitool-zip-builder 的审计；
-- toy：不带平台清单、不跑小红书审计，zip 根目录直接是 `index.html`（详见 `platforms/toy/README.md`）。
-  已发布版本：https://www.bilibili.com/toy/zhao-tingche-toy/index.html
+- toy：注入 `PLATFORM="toy"`（`NO_GEO=true`：B站 iframe 权限策略禁死定位，交互降级为「同区优先」）
+  + B站 SDK + `ip-city.js`，不带平台清单、不跑小红书审计，zip 根目录直接是 `index.html`
+  （详见 `platforms/toy/README.md`）。已发布版本：https://www.bilibili.com/toy/zhao-tingche-toy/index.html
+- pages：注入 `PLATFORM="web"`（`NO_GEO=false`，浏览器定位可用、不弹定位遮罩、不加载 B站 SDK），
+  其余与 toy 相同。`pages.yml` 用它发 GitHub Pages（自定义域 `jietingche.shenzjd.com`），
+  额外生成一个 `404.html` 把旧 Next 站的 `/city/*` `/park/*` 外链兜回首页。
+
+**数据在包里，不在服务器上**：`data.js` 是内联城市（深圳 484KB）+ `assets/c*.js` 129 个城市分包，
+搜索、筛选、按距离排序、出二维码全在浏览器里算，静态托管没有任何接口依赖。
 
 试水包（首审验红线用，只出少数车场，包约 30KB）：
 

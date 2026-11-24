@@ -14,7 +14,8 @@
     "snapshot": "node --no-warnings scripts/export-snapshot.mjs",
     "snapshot:publish": "node --no-warnings scripts/publish-snapshot.mjs",
     "minitool": "node --no-warnings scripts/build-h5.mjs --target xhs",
-    "toy": "node --no-warnings scripts/build-h5.mjs --target toy"
+    "toy": "node --no-warnings scripts/build-h5.mjs --target toy",
+    "web": "node --no-warnings scripts/build-h5.mjs --target pages"
   },
   "dependencies": {
     "@libsql/client": "^0.18.0",

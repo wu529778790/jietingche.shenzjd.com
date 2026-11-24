@@ -1,9 +1,11 @@
 #!/usr/bin/env node
 /**
  * 静态 H5 构建：一份源（minitool/src）→ 按平台产出不同的包。
- * 目前两个目标：
- *   xhs  小红书小工具：minitool/dist + mini_tool.json + minitool-zip-builder 审计
- *   toy  B站 Toy：platforms/toy/dist（根目录 index.html），不需要小红书清单与审计
+ * 目前三个目标：
+ *   xhs    小红书小工具：minitool/dist + mini_tool.json + minitool-zip-builder 审计
+ *   toy    B站 Toy：platforms/toy/dist（根目录 index.html），不需要小红书清单与审计
+ *   pages  纯浏览器静态站（GitHub Pages）：platforms/pages/dist，与 toy 同源，
+ *          差别只有 PLATFORM="web"（NO_GEO=false，浏览器定位可用）且不加载 B站 SDK
  *
  * 多城市结构（官方 §2.7 静态资源外移）：
  *   <dist>/index.html            入口（必须在根目录，两个平台都认）
@@ -15,6 +17,7 @@
  * 用法：
  *   node --no-warnings scripts/build-h5.mjs --target xhs            默认目标，内联深圳市
  *   node --no-warnings scripts/build-h5.mjs --target toy            出 B站 Toy 包
+ *   node --no-warnings scripts/build-h5.mjs --target pages          出纯浏览器静态站（GitHub Pages）
  *   node --no-warnings scripts/build-h5.mjs --city 广州市           内联城市改为广州
  *   node --no-warnings scripts/build-h5.mjs --snapshot data/jtc-snapshot.json
  *
@@ -43,7 +46,7 @@ const argValue = (name) => {
   return i >= 0 ? args[i + 1] : undefined;
 };
 
-/** 各平台的差异只有：产物目录、包名、要不要小红书清单、要不要跑小红书审计 */
+/** 各平台的差异只有：产物目录、包名、要不要小红书清单、要不要跑小红书审计、注入哪个平台标记 */
 const TARGETS = {
   xhs: {
     label: "小红书小工具",
@@ -58,6 +61,17 @@ const TARGETS = {
     zipName: "zhao-tingche-toy.zip",
     platformManifest: false,
     xhsAudit: false,
+    platform: "toy",
+  },
+  pages: {
+    // 纯浏览器静态站（GitHub Pages / 任意静态托管）：定位可用、无容器限制，
+    // 跟 toy 包的唯一区别就是 PLATFORM="web"（NO_GEO=false）且不注入 B站 SDK
+    label: "静态站（浏览器）",
+    dist: "platforms/pages/dist",
+    zipName: "zhao-tingche-web.zip",
+    platformManifest: false,
+    xhsAudit: false,
+    platform: "web",
   },
 };
 
@@ -298,19 +312,23 @@ copyFileSync(resolve(SRC_DIR, "index.html"), resolve(DIST, "index.html"));
  * 平台标记。小红书容器里凭证图一律不渲染（机审红线，见 app.js 的 PLATFORM 注释）；
  * B 站 Toy 没这条限制，不把码摆出来用户就没有办理入口，所以构建时注入 "toy"
  * 让弹层直接显示二维码。改注入不改源文件，小红书包永远走最严的那条分支。
+ * pages（纯浏览器）注入 "web"：不加载 B站 SDK，但保留 ip-city 兜底（拒授权也能按 IP 到城市）。
  */
-if (targetName === "toy") {
+if (TARGET.platform) {
   const entry = resolve(DIST, "index.html");
+  const platformScript = `  <script>window.__JTC_PLATFORM__="${TARGET.platform}";</script>\n`
+    // @toy-sdk：官方 SDK 走协议相对地址（自带 https 判定），容器安全区 / 相册 / 分享都靠它
+    + (TARGET.platform === "toy"
+      ? '  <script src="//s1.hdslb.com/bfs/seed/toy/app/sdk/toy-sdk.js"></script>\n'
+      : "")
+    // @ipcity：拿不到经纬度时按 IP 兜底到城市级（Toy 是唯一出路；浏览器是用户拒授权时的退路）
+    + '  <script src="./ip-city.js"></script>\n'
+    + '  <script src="./qr-encoder.js"></script>';
   writeFileSync(
     entry,
     readFileSync(entry, "utf8").replace(
       '  <script src="./qr-encoder.js"></script>',
-      // @toy-sdk：官方 SDK 走协议相对地址（自带 https 判定），容器安全区 / 相册 / 分享都靠它
-      '  <script>window.__JTC_PLATFORM__="toy";</script>\n'
-      + '  <script src="//s1.hdslb.com/bfs/seed/toy/app/sdk/toy-sdk.js"></script>\n'
-      // @toy-ipcity：Toy 拿不到经纬度（容器禁 geolocation + SDK 无定位），按 IP 兜底到城市级
-      + '  <script src="./ip-city.js"></script>\n'
-      + '  <script src="./qr-encoder.js"></script>',
+      platformScript,
     ),
   );
   // 小红书包不带这个文件：那边禁止一切网络请求，扫描门禁会直接拦（见下文 BANNED）

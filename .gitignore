@@ -57,6 +57,7 @@ next-env.d.ts
 # H5 构建产物（由 scripts/build-h5.mjs 从 minitool/src + 快照/本地库 生成）
 /minitool/dist/
 /platforms/toy/dist/
+/platforms/pages/dist/
 
 # GitHub Pages 部署目录（pages.yml 构建产物，解压自 toy 包）
 /_site/

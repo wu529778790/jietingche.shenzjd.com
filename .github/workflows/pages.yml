@@ -1,10 +1,11 @@
 name: GitHub Pages（静态包留档）
 
-# 把 platforms/toy/dist 里的静态包发到 GitHub Pages：
-#   https://<owner>.github.io/jietingche/
-# 跟 B 站 Toy 用的是**同一个 zip**（根目录 index.html、资源全相对路径），
-# 所以部署在子目录 /jietingche/ 下也能直接跑，不需要 basePath。
-# 数据、二维码、筛选排序全在包里，Pages 上零后端、零接口。
+# 把 platforms/pages/dist 里的静态站发到 GitHub Pages（自定义域 jietingche.shenzjd.com）：
+# 构建目标是 `--target pages`（PLATFORM="web"），与 B站 Toy 同一份源，差别只有：
+#   - 浏览器定位可用（NO_GEO=false，「离我最近」是真的按距离排）；
+#   - 不加载 B站 SDK、不弹那张关不掉的定位遮罩；
+#   - 数据、二维码、筛选排序全在包里，Pages 上零后端、零接口。
+# 产物资源全相对路径，部署在子目录也能跑。
 #
 # ⚠️ 两个前置条件，缺了会在部署那一步失败：
 #   1. 仓库设置 → Pages → Build and deployment → Source 选「GitHub Actions」；
@@ -72,21 +73,32 @@ jobs:
           gh release download "$TAG" -p jtc-snapshot.json -D data
           node -e "const s=require('./data/jtc-snapshot.json');console.log('快照', s.rows.length, '条套餐 /', s.cities.length, '个城市 /', s.generatedAt)"
 
-      - name: 打包 Toy 静态包
-        run: npm run toy -- --snapshot data/jtc-snapshot.json --city "${{ inputs.city || '深圳市' }}"
+      - name: 打包静态站（浏览器版）
+        # 用 pages 目标而不是 toy：toy 包 NO_GEO=true（B站 iframe 禁死定位），
+        # 放浏览器里会把「离我最近」降级成「同区优先」、还要弹一张关不掉的定位遮罩
+        run: npm run web -- --snapshot data/jtc-snapshot.json --city "${{ inputs.city || '深圳市' }}"
 
       - name: 铺到 _site
         run: |
           set -euo pipefail
           rm -rf _site && mkdir -p _site
           # zip 根目录就是 index.html，解压即站点根目录
-          unzip -q platforms/toy/dist/zhao-tingche-toy.zip -d _site
+          unzip -q platforms/pages/dist/zhao-tingche-web.zip -d _site
           # 不建 .nojekyll 的话，Jekyll 会吞掉 _ 开头的文件
           touch _site/.nojekyll
+          # 旧 Next 站的 /city/* /park/* 外链还散落在搜索和分享里，兜回首页别给 404
+          cat > _site/404.html <<'HTML'
+          <!doctype html><html lang="zh-CN"><head><meta charset="utf-8">
+          <meta name="viewport" content="width=device-width,initial-scale=1">
+          <meta http-equiv="refresh" content="0; url=/">
+          <title>页面已下线 · 泊月</title></head>
+          <body style="font:15px/1.7 -apple-system,sans-serif;padding:48px 20px;color:#334">
+          <p>这个页面已经下线了。</p><p><a href="/" style="color:#1b6bff">回到首页按位置找停车月卡 →</a></p>
+          <script>location.replace("/")</script></body></html>
+          HTML
           test -f _site/index.html
           test -d _site/assets
           echo "站点：$(find _site -type f | wc -l) 个文件 / $(du -sh _site | cut -f1)"
-          du -sh _site > /tmp/size || true
 
       - uses: actions/configure-pages@v5
 
