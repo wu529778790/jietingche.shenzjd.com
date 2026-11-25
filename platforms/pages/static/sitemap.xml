@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  静态站 sitemap：只列真正存在的页面。
+
+  旧 Next 站那份运行时 sitemap 是 ~9100 条（首页 + 130 城 + 551 区 + 8442 车场），
+  那些 /city/* /park/* 在静态包里没有对应文件——把它们写进来等于让 Google 抓 9100 个 404，
+  比没有 sitemap 更糟（Search Console 会一片「已发现但无法编入索引」）。
+  站点就一个页面时，这一条就够用了；要恢复落地页收录得先生成静态落地页。
+-->
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url>
+    <loc>https://jietingche.shenzjd.com/</loc>
+    <changefreq>weekly</changefreq>
+    <priority>1.0</priority>
+  </url>
+</urlset>

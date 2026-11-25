@@ -126,6 +126,9 @@ npm run web -- --snapshot data/jtc-snapshot.json        # 纯浏览器静态站 
 - pages：注入 `PLATFORM="web"`（`NO_GEO=false`，浏览器定位可用、不弹定位遮罩、不加载 B站 SDK），
   其余与 toy 相同。`pages.yml` 用它发 GitHub Pages（自定义域 `jietingche.shenzjd.com`），
   额外生成一个 `404.html` 把旧 Next 站的 `/city/*` `/park/*` 外链兜回首页。
+  根目录另带 `platforms/pages/static/{robots.txt,sitemap.xml}`——静态托管没有服务端路由，
+  这两个只能当文件发。**sitemap 只列真实存在的页面（当前只有首页一条）**：旧 Next 站那份
+  ~9100 条的 sitemap 里的 `/city/*` `/park/*` 在静态包里没有对应文件，照抄等于让 Google 抓一堆 404。
 
 **数据在包里，不在服务器上**：`data.js` 是内联城市（深圳 484KB）+ `assets/c*.js` 129 个城市分包，
 搜索、筛选、按距离排序、出二维码全在浏览器里算，静态托管没有任何接口依赖。

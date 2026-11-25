@@ -1,0 +1,6 @@
+# 泊月 · 停车月卡（静态站）
+# 这里只有打包进 H5 的静态页，没有 /admin 也没有 /api，所以不写 disallow。
+User-agent: *
+Allow: /
+
+Sitemap: https://jietingche.shenzjd.com/sitemap.xml

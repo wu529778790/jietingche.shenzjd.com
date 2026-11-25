@@ -72,6 +72,8 @@ const TARGETS = {
     platformManifest: false,
     xhsAudit: false,
     platform: "web",
+    // 静态托管没有服务端路由，robots.txt / sitemap.xml 只能以文件形式一起发出去
+    staticDir: "platforms/pages/static",
   },
 };
 
@@ -338,6 +340,14 @@ for (const f of ["app.js", "style.css"]) {
   copyFileSync(resolve(SRC_DIR, f), resolve(DIST, f));
 }
 
+/* 目标自带的根目录静态文件（pages 的 robots.txt / sitemap.xml） */
+const STATIC_FILES = TARGET.staticDir ? readdirSync(resolve(ROOT, TARGET.staticDir)) : [];
+if (TARGET.staticDir) {
+  for (const f of STATIC_FILES) {
+    copyFileSync(resolve(ROOT, TARGET.staticDir, f), resolve(DIST, f));
+  }
+}
+
 /* 未定义标识符门禁。app.js 是没有构建步骤的 ES5 IIFE：删掉一个顶层变量却漏改引用时，
    语法检查和 eslint 都发现不了，只有用户点到那一层才抛 ReferenceError
    （TYPE_DAYS 那次就这么漏到预览了）。用 tsc 的 checkJs 只抓 TS2304，
@@ -537,6 +547,7 @@ const zipEntries = [
   "qr-encoder.js",
   ...(existsSync(resolve(DIST, "ip-city.js")) ? ["ip-city.js"] : []),
   ...(TARGET.platformManifest ? ["mini_tool.json"] : []),
+  ...STATIC_FILES,
   // 试水包没有城市分包，assets/ 是空目录，不塞进 zip（避免打包工具报空目录）
   ...(cityFiles > 0 ? ["assets"] : []),
 ];
