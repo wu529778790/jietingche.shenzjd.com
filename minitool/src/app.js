@@ -1303,6 +1303,28 @@
     return null;
   }
 
+  /* 落地页深链参数：?city=<城市全名>&kw=<车场名>（静态站 /park/<code> 的按钮带过来）。
+     不用 URLSearchParams —— 模板基线是 Chrome 61，老 WebView 里它不存在；
+     坏参数一律忽略，不能因为一个畸形 query 把首页搞白。 */
+  function deepLink() {
+    var search = "";
+    try { search = location.search || ""; } catch (e) { return null; }
+    if (search.length < 2) return null;
+    var q = {};
+    var parts = search.replace(/^\?/, "").split("&");
+    for (var i = 0; i < parts.length; i++) {
+      if (!parts[i]) continue;
+      var kv = parts[i].split("=");
+      try {
+        q[decodeURIComponent(kv[0])] = decodeURIComponent((kv[1] || "").replace(/\+/g, " "));
+      } catch (e2) { /* 坏参数跳过 */ }
+    }
+    var kw = String(q.kw || q.q || "").replace(/^\s+|\s+$/g, "");
+    var entry = q.city ? matchIndexCity(q.city) : null;
+    if (!entry && !kw) return null;
+    return { entry: entry, kw: kw };
+  }
+
   function lsSet(key, data) {
     try { localStorage.setItem("zc_" + key, JSON.stringify(data)); return true; } catch (e) { return false; }
   }
@@ -1667,16 +1689,34 @@
       $("notice").hidden = true;
     });
 
-    /* 恢复上次选择的城市 → 检查是否弹定位引导 */
-    storageGet("city", function (saved) {
-      if (saved && saved.file) {
-        for (var i = 0; i < INDEX.cities.length; i++) {
-          if (INDEX.cities[i].f === saved.file) { pickCity(INDEX.cities[i], checkGeoAsk); return; }
-        }
+    /* 深链：静态落地页 /park/<code> 的按钮会带 ?city=&kw= 跳回来，直接落到那个车场。
+       比城市记忆优先——用户从「深圳某车场」页面点进来，要的就是这个车场，别再按上次城市走 */
+    var deep = deepLink();
+    if (deep) {
+      if (deep.entry) {
+        pickCity(deep.entry, function () {
+          if (deep.kw) { state.kw = deep.kw; $("kw").value = deep.kw; }
+          checkGeoAsk();
+          applyFilters();
+        });
+      } else {
+        state.kw = deep.kw;
+        $("kw").value = deep.kw;
+        checkGeoAsk();
+        applyFilters();
       }
-      /* 本地没有城市记忆（换设备 / 清过缓存）：用云存档里的城市兜底，拿不到就照常走定位引导 */
-      restoreCloudCity(checkGeoAsk);
-    });
+    } else {
+      /* 恢复上次选择的城市 → 检查是否弹定位引导 */
+      storageGet("city", function (saved) {
+        if (saved && saved.file) {
+          for (var i = 0; i < INDEX.cities.length; i++) {
+            if (INDEX.cities[i].f === saved.file) { pickCity(INDEX.cities[i], checkGeoAsk); return; }
+          }
+        }
+        /* 本地没有城市记忆（换设备 / 清过缓存）：用云存档里的城市兜底，拿不到就照常走定位引导 */
+        restoreCloudCity(checkGeoAsk);
+      });
+    }
 
     /* 引导卡上任意点击（按钮/遮罩）都算手势：关卡 + 立刻定位——进页面的每个人都走到定位 */
     $("geoPanel").addEventListener("click", function () {

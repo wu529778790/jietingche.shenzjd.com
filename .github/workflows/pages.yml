@@ -84,6 +84,8 @@ jobs:
           rm -rf _site && mkdir -p _site
           # zip 根目录就是 index.html，解压即站点根目录
           unzip -q platforms/pages/dist/zhao-tingche-web.zip -d _site
+          # 落地页（城市/区域/车场）用同一份快照铺成静态 HTML，并按实际文件重写 sitemap
+          node --no-warnings scripts/build-pages-site.mjs --snapshot data/jtc-snapshot.json --out _site
           # 不建 .nojekyll 的话，Jekyll 会吞掉 _ 开头的文件
           touch _site/.nojekyll
           # 旧 Next 站的 /city/* /park/* 外链还散落在搜索和分享里，兜回首页别给 404

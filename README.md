@@ -133,6 +133,26 @@ npm run web -- --snapshot data/jtc-snapshot.json        # 纯浏览器静态站 
 **数据在包里，不在服务器上**：`data.js` 是内联城市（深圳 484KB）+ `assets/c*.js` 129 个城市分包，
 搜索、筛选、按距离排序、出二维码全在浏览器里算，静态托管没有任何接口依赖。
 
+### 静态落地页（Pages 的收录入口）
+
+H5 包只有 `index.html` 一页，爬虫看不到车场；旧 Next 站的 9 千多个 `/city/*` `/park/*` 才是 SEO 家当。
+`scripts/build-pages-site.mjs` 用同一份快照，在构建期把它们铺成纯静态 HTML（URL 规则与旧站一致）：
+
+```bash
+npm run web                                    # 先出 H5 主站 → platforms/pages/dist
+npm run landing                                # 再铺落地页，并按实际文件重写 sitemap.xml
+node scripts/build-pages-site.mjs --city 深圳市 --parks 20 --out /tmp/site   # 样本模式
+```
+
+- `/city/` 全站城市索引、`/city/<城市>/` 城市页、`/city/<城市>/<区>/` 区域页、`/park/<park_code>/` 车场页；
+- **目录名用中文原文，href/canonical 用百分号编码**——服务器收到请求会先解码再查文件，目录写成编码形式反而 404；
+- 每页独立 title/description/canonical + BreadcrumbList JSON-LD，车场页另有 FAQPage（问答里带该车场真实价格，
+  避免 8 千页共用一套文案被判薄内容）；
+- 「付定金专用」的占位套餐（¥10）必须过滤，否则会把城市最低价写成 ¥10/月；
+- 车场页的「打开查询页」带 `?city=&kw=` 深链回 H5（`minitool/src/app.js` 的 `deepLink()`），落地即落车场。
+
+实测全量：**8460 页 / 104MB / 生成 2.5 秒**，Pages 的 1GB 上限绰绰有余。
+
 试水包（首审验红线用，只出少数车场，包约 30KB）：
 
 ```bash
