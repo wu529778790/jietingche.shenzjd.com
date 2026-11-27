@@ -56,6 +56,31 @@ const yuan = (cent) => (cent / 100).toFixed(2).replace(/\.00$/, "");
 const monthlyText = (cent) => (cent > 0 ? `¥${Math.round(cent / 100)}` : "");
 const cityShort = (city) => String(city || "").replace(/市$/, "");
 
+/**
+ * 区县名归一（与 src/lib/district.ts 同一份判断，改一处必须同步另一处）。
+ *
+ * 官方数据同一个区县有两种写法（「上海市嘉定区」/「嘉定区」），各自成页就是两个
+ * URL、两份薄内容；采集脏值还会把上级行政区写成区县（「深圳市 / 中国」）。
+ * 静态站在这里收口：归一后为空的，车场归城市页，不再单独出区域页。
+ */
+const DISTRICT_PLACEHOLDERS = new Set(["中国", "市辖区", "辖区", "县", "-", "无", "其他"]);
+const squeeze = (value) => String(value ?? "").replace(/\s+/g, "").trim();
+
+function normalizeDistrict(city, raw) {
+  let name = squeeze(raw);
+  const cityName = squeeze(city);
+  if (!name || DISTRICT_PLACEHOLDERS.has(name)) return "";
+  const forms = cityName ? (cityName.endsWith("市") ? [cityName] : [`${cityName}市`, cityName]) : [];
+  for (const form of forms) {
+    if (name.length > form.length && name.startsWith(form)) {
+      name = name.slice(form.length);
+      break;
+    }
+  }
+  if (!name || DISTRICT_PLACEHOLDERS.has(name) || (cityName && name === cityName)) return "";
+  return name;
+}
+
 const esc = (text) =>
   String(text ?? "")
     .replace(/&/g, "&amp;")
@@ -120,12 +145,14 @@ for (const row of snap.rows || []) {
 
   let park = parksByCode.get(code);
   if (!park) {
+    const city = String(row.city || "").trim();
     park = {
       code,
       name: String(row.park_name || code).trim(),
       address: String(row.address || "").trim(),
-      district: String(row.district || "").trim(),
-      city: String(row.city || "").trim(),
+      city,
+      // 区县在这里就收口（别等到拼目录时再判），下游 byArea / 面包屑 / 内链全跟着走
+      district: normalizeDistrict(city, row.district),
       lat: Number(row.lat) || 0,
       lng: Number(row.lng) || 0,
       packages: [],
@@ -627,7 +654,14 @@ for (const city of targetCities) {
 if (!ONLY_CITY) cityIndexPage();
 
 /* sitemap：按真实生成的文件来，首页 + /city/ + 所有落地页 */
-const today = new Date().toISOString().slice(0, 10);
+/**
+ * lastmod 用快照的生成日，不用构建日。
+ * 用构建日等于每次部署都宣称「全站 8000 页刚改过」，Google 会按这个信号反复回抓，
+ * 抓回来发现内容没变，长期就降权成「已抓取-尚未编入索引」——正是覆盖率里最大的一块。
+ * 快照日只在数据真的变了（发了新 snapshot-* Release）时才前进。
+ */
+const snapshotDay = String(snap.generatedAt || "").slice(0, 10);
+const today = /^\d{4}-\d{2}-\d{2}$/.test(snapshotDay) ? snapshotDay : new Date().toISOString().slice(0, 10);
 const entries = ["/", ...urls].map((urlPath) => {
   const loc = SITE + urlPath;
   const priority = urlPath === "/" ? "1.0" : urlPath.startsWith("/park/") ? "0.7" : "0.8";
